@@ -1,0 +1,34 @@
+# QQ AI Bot 配置文件
+# 复制此文件为 config.local.yml 进行本地修改（避免误提交）
+# 或通过环境变量 AIBOT_LLM__API_KEY=xxx 覆盖
+
+llm:
+  # provider / base_url / model 优先从 .env 或环境变量读取
+  # 不填则使用厂商预设
+  api_key: ""   # 建议用 .env 设置
+  temperature: 0.8
+  max_tokens: 1024
+  timeout: 60
+
+memory:
+  short_term_rounds: 8     # 短期记忆保留轮数
+  summary_interval: 10     # 摘要生成间隔
+  memory_extraction_interval: 1   # 记忆提取间隔（设为 3-5 可省钱）
+  monthly_rebuild_interval_days: 30
+
+dialogue:
+  max_response_length: 60
+  enable_action_description: true
+
+security:
+  enable_content_filter: true
+  # forbidden_keywords 定义在代码中
+
+logging:
+  level: "INFO"
+  file: "data/bot.log"
+
+paths:
+  characters_dir: "characters"
+  data_dir: "data"
+  db_path: "data/bot.db"

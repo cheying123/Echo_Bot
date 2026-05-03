@@ -1,0 +1,27 @@
+# 运行时数据
+data/
+*.db
+*.log
+
+# 配置（含敏感信息）
+.env
+config.local.yml
+config.local.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

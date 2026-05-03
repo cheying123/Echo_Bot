@@ -1,0 +1,17 @@
+# QQ AI Bot — 依赖
+# ====================
+
+# 核心
+pydantic>=2.0.0
+httpx>=0.27.0
+aiosqlite>=0.20.0
+pyyaml>=6.0
+
+# WebSocket 服务器（对接 go-cqhttp）
+websockets>=12.0
+
+# .env 文件加载（生产部署用）
+python-dotenv>=1.0.0
+
+# 容错 JSON 解析
+json5>=0.9.0
