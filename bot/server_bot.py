@@ -51,8 +51,6 @@ class QQBotServer:
         self.host = host
         self.ws_port = ws_port
 
-        # 用户 → 角色绑定管理
-        self._user_char_map: dict[str, str] = {}
         # 消息 ID 自增（用于 echo）
         self._msg_id = 0
 
@@ -131,17 +129,19 @@ class QQBotServer:
         if not raw_message or not user_id:
             return
 
-        # ---- 系统命令（私聊有效） ----
-        if msg_type == "private" and raw_message.startswith("/"):
+        # ---- 系统命令 ----
+        if raw_message.startswith("/"):
+            if msg_type == "group" and not self._is_at_bot(event):
+                return
+            if msg_type == "group":
+                raw_message = self._strip_at(raw_message)
             await self._handle_command(raw_message, user_id, event)
             return
 
-        # ---- 群聊 @ 或者私聊 -> AI 回复 ----
+        # ---- 群聊 @ -> AI 回复 ----
         if msg_type == "group":
-            # 只回复 @机器人的消息
             if not self._is_at_bot(event):
                 return
-            # 去除 @ 前缀
             raw_message = self._strip_at(raw_message)
 
         character_id = self._get_user_character(user_id)
@@ -200,7 +200,7 @@ class QQBotServer:
             names = "、".join(c["name"] for c in chars)
             await self._reply(event, f"未找到角色「{arg}」。可用角色: {names}")
             return
-        self._user_char_map[user_id] = matched["id"]
+        self._set_user_character(user_id, matched["id"])
         await self._reply(event, f"已切换至角色「{matched['name']}」，开始对话吧。")
 
     async def _cmd_list_roles(self, event: dict):
@@ -308,10 +308,12 @@ class QQBotServer:
     # ---- 辅助 ----
 
     def _get_user_character(self, user_id: str) -> Optional[str]:
-        return self._user_char_map.get(user_id)
+        """获取用户绑定的角色（从数据库）"""
+        return self.engine.profile_mgr.get_binding(user_id)
 
-    def set_user_character(self, user_id: str, character_id: str):
-        self._user_char_map[user_id] = character_id
+    def _set_user_character(self, user_id: str, character_id: str):
+        """持久化绑定用户到角色"""
+        self.engine.profile_mgr.set_binding(user_id, character_id)
 
     @staticmethod
     def _is_at_bot(event: dict) -> bool:

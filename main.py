@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _project_root = Path(__file__).parent
@@ -40,7 +41,9 @@ def setup_logging(level: str = "INFO", log_file: str | None = None):
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+        handlers.append(RotatingFileHandler(
+            log_file, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8",
+        ))
 
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),

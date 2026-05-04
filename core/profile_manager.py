@@ -207,8 +207,37 @@ class ProfileManager:
                 CREATE INDEX IF NOT EXISTS idx_logs_user_char
                 ON conversation_logs(user_id, character_id)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_bindings (
+                    user_id TEXT PRIMARY KEY,
+                    character_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
             conn.commit()
             conn.close()
+
+    def get_binding(self, user_id: str) -> Optional[str]:
+        """获取用户绑定的角色 ID"""
+        row = self._fetch_one(
+            "SELECT character_id FROM user_bindings WHERE user_id = ?",
+            (user_id,),
+        )
+        return row[0] if row else None
+
+    def set_binding(self, user_id: str, character_id: str):
+        """绑定用户到角色"""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO user_bindings (user_id, character_id, updated_at)
+                       VALUES (?, ?, ?)""",
+                    (user_id, character_id, datetime.now().isoformat()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))
