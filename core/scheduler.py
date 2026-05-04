@@ -74,6 +74,8 @@ class Scheduler:
 
         async with httpx.AsyncClient(timeout=15) as client:
             for user_id, city in users:
+                if not self.pm.get_weather_on(user_id):
+                    continue
                 try:
                     weather = await self._fetch_weather(client, city)
                     msg = f"☀️ 早安～\n{city}今日天气：{weather}"
@@ -103,6 +105,8 @@ class Scheduler:
             try:
                 reminders = self.pm.get_due_reminders()
                 for r in reminders:
+                    if not self.pm.get_remind_on(r["user_id"]):
+                        continue
                     msg = f"⏰ 提醒：{r['message']}"
                     await self.send(r["user_id"], msg)
                     self.pm.mark_reminder_done(r["id"])

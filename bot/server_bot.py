@@ -217,6 +217,8 @@ class QQBotServer:
             await self._cmd_status(bind_key, event)
         elif action in ("setcity", "城市"):
             await self._cmd_setcity(bind_key, arg, event)
+        elif action in ("weather", "天气"):
+            await self._cmd_weather(bind_key, arg, event)
         elif action in ("remind", "提醒", "reminder"):
             await self._cmd_remind(bind_key, arg, event)
         elif action in ("listremind", "我的提醒"):
@@ -321,12 +323,26 @@ class QQBotServer:
             "管理员: /admin list / admin add / admin remove\n"
             "       /reload 重新加载角色卡\n"
             "       /stats 查看运行统计\n"
-            "生活: /setcity <城市> 设置城市（推送天气）\n"
+            "生活: /setcity <城市> 设置城市\n"
+            "      /weather on/off  开关天气预报\n"
             "      /remind <时间> <事项> 设置提醒\n"
             "      /listremind 查看待办提醒"
         ))
 
     # ---- 城市与提醒 ----
+
+    async def _cmd_weather(self, bind_key: str, arg: str, event: dict):
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+        cmd = arg.strip().lower()
+        if cmd in ("on", "开", "开启"):
+            self.engine.profile_mgr.set_weather_on(user_id, True)
+            await self._reply(event, "天气预报已开启，每天早上 7 点推送。")
+        elif cmd in ("off", "关", "关闭"):
+            self.engine.profile_mgr.set_weather_on(user_id, False)
+            await self._reply(event, "天气预报已关闭。")
+        else:
+            status = "开启" if self.engine.profile_mgr.get_weather_on(user_id) else "关闭"
+            await self._reply(event, f"天气预报当前状态: {status}\n/weather on 开启\n/weather off 关闭")
 
     async def _cmd_setcity(self, bind_key: str, arg: str, event: dict):
         if not arg:
@@ -337,14 +353,25 @@ class QQBotServer:
         await self._reply(event, f"已设置城市为「{arg.strip()}」，每天早上 7 点推送天气预报。")
 
     async def _cmd_remind(self, bind_key: str, arg: str, event: dict):
-        if not arg:
-            await self._reply(event, "用法: /remind <时间> <事项>，例如 /remind 明天早上8点 开会")
-            return
         user_id = bind_key.replace("private_", "").replace("group_", "")
-        # 尝试分割时间和事项
-        dt_str = arg
-        msg_str = ""
-        # 尝试匹配引号或自然分割
+        cmd = arg.strip().lower()
+
+        # 开关
+        if cmd in ("on", "开", "开启"):
+            self.engine.profile_mgr.set_remind_on(user_id, True)
+            await self._reply(event, "日程提醒已开启。")
+            return
+        elif cmd in ("off", "关", "关闭"):
+            self.engine.profile_mgr.set_remind_on(user_id, False)
+            await self._reply(event, "日程提醒已关闭。")
+            return
+
+        if not cmd:
+            status = "开启" if self.engine.profile_mgr.get_remind_on(user_id) else "关闭"
+            await self._reply(event, f"日程提醒当前状态: {status}\n/remind on 开启\n/remind off 关闭\n/remind <时间> <事项> 设置提醒")
+            return
+
+        # 设置提醒
         parts = arg.split(maxsplit=1)
         if len(parts) >= 2:
             time_text = parts[0]
@@ -354,7 +381,6 @@ class QQBotServer:
                 self.engine.profile_mgr.add_reminder(user_id, parsed, content)
                 await self._reply(event, f"已设置提醒：{time_text} {content}")
                 return
-        # 全段尝试解析
         parsed = parse_reminder_time(arg)
         if parsed:
             await self._reply(event, f"已设置提醒：{arg}")

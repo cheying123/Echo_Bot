@@ -247,6 +247,15 @@ class ProfileManager:
                 CREATE INDEX IF NOT EXISTS idx_reminders_time
                 ON reminders(remind_at)
             """)
+            # 迁移：给 user_settings 添加开关字段
+            try:
+                conn.execute("ALTER TABLE user_settings ADD COLUMN weather_on INTEGER DEFAULT 1")
+            except Exception:
+                pass  # 字段已存在
+            try:
+                conn.execute("ALTER TABLE user_settings ADD COLUMN remind_on INTEGER DEFAULT 1")
+            except Exception:
+                pass
             conn.commit()
             conn.close()
 
@@ -341,6 +350,42 @@ class ProfileManager:
                     """INSERT OR REPLACE INTO user_settings (user_id, city, updated_at)
                        VALUES (?, ?, ?)""",
                     (user_id, city, datetime.now().isoformat()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_weather_on(self, user_id: str) -> bool:
+        row = self._fetch_one(
+            "SELECT weather_on FROM user_settings WHERE user_id = ?", (user_id,)
+        )
+        return bool(row[0]) if row else True
+
+    def set_weather_on(self, user_id: str, on: bool):
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO user_settings (user_id, city, weather_on, updated_at) VALUES (?, COALESCE((SELECT city FROM user_settings WHERE user_id = ?), ''), ?, ?)",
+                    (user_id, user_id, int(on), datetime.now().isoformat()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_remind_on(self, user_id: str) -> bool:
+        row = self._fetch_one(
+            "SELECT remind_on FROM user_settings WHERE user_id = ?", (user_id,)
+        )
+        return bool(row[0]) if row else True
+
+    def set_remind_on(self, user_id: str, on: bool):
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO user_settings (user_id, city, remind_on, updated_at) VALUES (?, COALESCE((SELECT city FROM user_settings WHERE user_id = ?), ''), ?, ?)",
+                    (user_id, user_id, int(on), datetime.now().isoformat()),
                 )
                 conn.commit()
             finally:
