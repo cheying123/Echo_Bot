@@ -7,8 +7,6 @@
 #
 # 日志查看: docker compose logs -f
 
-version: "3.8"
-
 services:
   bot:
     build: .
@@ -16,6 +14,9 @@ services:
     restart: unless-stopped
     ports:
       - "8765:8765"
+    mem_limit: 512m
+    mem_reservation: 256m
+    oom_kill_disable: false
     environment:
       # API 配置（优先从 .env 文件读取）
       - AIBOT_LLM__API_KEY=${AIBOT_LLM__API_KEY:?请设置 AIBOT_LLM__API_KEY}

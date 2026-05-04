@@ -263,17 +263,9 @@ class PromptBuilder:
     # ---- 内部辅助 ----
 
     def _retrieve_relevant_lines(self, user_message: str, dialogues: List[str]) -> List[str]:
-        """从台词库检索与当前消息最相关的台词（优先 API embedding，失败降级 TF-IDF）"""
+        """从台词库检索与当前消息最相关的台词"""
         if not dialogues or not user_message:
             return []
-        try:
-            from core.retriever_embed import APIEmbeddingRetriever
-            r = APIEmbeddingRetriever()
-            results = r.retrieve(user_message, dialogues, top_k=5)
-            if results:
-                return [line for line, _ in results]
-        except Exception as e:
-            logger.debug("API Embedding 失败: %s", e)
         try:
             from core.retriever import DialogueRetriever as Tfidf
             results = Tfidf().retrieve(user_message, dialogues, top_k=5)

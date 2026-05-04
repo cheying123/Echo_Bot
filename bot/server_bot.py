@@ -769,7 +769,7 @@ class QQBotServer:
             return False
         if isinstance(message, str):
             import re
-            return bool(re.match(r'^\[CQ:at,qq=\d+\]', message.strip()))
+            return bool(re.match(r'^\[CQ:at,qq=(?:\d+|all)\]', message.strip()))
         return False
 
     @staticmethod
