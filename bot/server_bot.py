@@ -767,11 +767,10 @@ class QQBotServer:
                 if isinstance(seg, dict) and seg.get("type") == "at":
                     return True
             return False
-        # 字符串格式：检查是否以 CQ at 开头
         if isinstance(message, str):
             import re
             return bool(re.match(r'^\[CQ:at,qq=\d+\]', message.strip()))
-        return False  # 无法识别的格式，保守起见不回复
+        return False
 
     @staticmethod
     def _strip_at(text: str) -> str:

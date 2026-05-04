@@ -92,8 +92,9 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 - {dialogue_max_questions} 不要让对话变成审问，但自然的问句不需要刻意限制。
 - {action_description_rule}
 - **不要总是你问我答**：对话是自然的，你可以补充自己的想法、主动分享感受、延续话题。每次回复不一定要等用户再开口，除非明显感觉到用户想结束对话。
+- **上下文连贯**：群聊里像普通人一样自然地延续话题。别人说什么你就接什么，不用每句都自我介绍或报幕。你已经在这个对话里了，不用提醒别人你是谁。
 - **表情包**：{sticker_rule}
-- **说话节奏**：长回复中如果想表达停顿、思考或语气转换，用 `[pause]` 标记断句位置。程序会在 `[pause]` 处拆分消息逐条发送，模拟自然说话节奏。**不要用空行或换行符来分段，QQ消息里空行很难看。**
+- **说话节奏**：需要表达停顿或语气转换时可以用 `[pause]` 拆成多条发，但**不要为拆而拆**。一句能说完的话就一句发完。`[pause]` 只用在真正需要停顿的地方（比如说到一半做动作、语气转折）。不要把一段话生拆成两句无关的话。
 
 ### 3.4 学习机制（关键）
 每次回复后，你必须在回复末尾追加一段被 <<<MEMORY>>> 和 <<<END_MEMORY>>> 包裹的JSON。这段JSON用于记录你对用户的观察，对用户不可见。
@@ -262,17 +263,22 @@ class PromptBuilder:
     # ---- 内部辅助 ----
 
     def _retrieve_relevant_lines(self, user_message: str, dialogues: List[str]) -> List[str]:
-        """从台词库检索与当前消息最相关的台词"""
+        """从台词库检索与当前消息最相关的台词（优先 API embedding，失败降级 TF-IDF）"""
         if not dialogues or not user_message:
             return []
         try:
-            from core.retriever import DialogueRetriever
-            retriever = DialogueRetriever()
-            results = retriever.retrieve(user_message, dialogues, top_k=5)
-            # 只保留台词内容，去掉分数
-            return [line for line, _ in results]
+            from core.retriever_embed import APIEmbeddingRetriever
+            r = APIEmbeddingRetriever()
+            results = r.retrieve(user_message, dialogues, top_k=5)
+            if results:
+                return [line for line, _ in results]
         except Exception as e:
-            logger.debug("台词检索失败: %s", e)
+            logger.debug("API Embedding 失败: %s", e)
+        try:
+            from core.retriever import DialogueRetriever as Tfidf
+            results = Tfidf().retrieve(user_message, dialogues, top_k=5)
+            return [line for line, _ in results]
+        except Exception:
             return []
 
     def _format_examples(self, examples: List[SpeechExample]) -> str:
