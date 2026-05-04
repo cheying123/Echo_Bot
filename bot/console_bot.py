@@ -168,8 +168,7 @@ class ConsoleBot:
         self.current_char = self.engine.char_mgr.get_character(selected["id"])
 
         print(f"\n=== 切换到角色: {self.current_char.name} ===\n")
-        if self.current_char.first_meeting:
-            print(f"[开场白] {self.current_char.first_meeting}\n")
+        print("（开始对话，AI会基于角色性格自然回应）\n")
 
         return True
 

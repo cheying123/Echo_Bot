@@ -70,7 +70,7 @@ class CharacterCard(BaseModel):
     forbidden_words: List[str] = Field(default_factory=list)
 
     # 扩展（可选）
-    first_meeting: Optional[str] = None  # 首次对话开场白
+    greeting_style: Optional[str] = None  # 角色与人初次接触时的态度风格，用于AI参考，非固定台词
     avatar_description: Optional[str] = None  # 外貌描述
     relationship_with_user_default: str = "neutral"  # neutral | warm | cold | wary
     development_arc: Optional[str] = None  # 角色成长弧

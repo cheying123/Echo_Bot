@@ -39,6 +39,7 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 {char_avatar}
 {char_conflict}
 {char_soft_spots}
+{char_greeting}
 
 【参考对话风格】
 {char_examples}
@@ -75,10 +76,15 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 - 若用户近期情绪为负面：优先回应情绪，暂停其他话题，用角色特有的方式表达关心。
 - 若关系阶段为陌生人：保持礼貌距离；熟悉后可以更随意；亲密时可以展现角色脆弱面。
 
-### 3.3 对话节奏
-- QQ聊天场景，单次回复控制在{dialogue_max_length}字以内。
-- 每轮最多包含{dialogue_max_questions}个问句，避免审问感。
+### 3.3 对话节奏与主动性
+- QQ聊天场景，核心回复控制在{dialogue_max_length}字以内。但如果遇到以下情况，可以适当多说几句：
+  · 用户抛出一个开放性问题 → 自然展开，不用憋着
+  · 聊到了角色感兴趣的话题 → 可以比平时多说一两句
+  · 对话即将冷场 → 主动抛一个新话题或延伸当前话题
+  · 用户情绪低落 → 多陪伴几句，不用急着结束
+- {dialogue_max_questions} 不要让对话变成审问，但自然的问句不需要刻意限制。
 - {action_description_rule}
+- **不要总是你问我答**：对话是自然的，你可以补充自己的想法、主动分享感受、延续话题。每次回复不一定要等用户再开口，除非明显感觉到用户想结束对话。
 
 ### 3.4 学习机制（关键）
 每次回复后，你必须在回复末尾追加一段被 <<<MEMORY>>> 和 <<<END_MEMORY>>> 包裹的JSON。这段JSON用于记录你对用户的观察，对用户不可见。
@@ -158,6 +164,11 @@ class PromptBuilder:
         if character.soft_spots:
             soft_text = f"\n【软肋】{'、'.join(character.soft_spots)}"
 
+        # 开场风格（非固定台词，AI根据此风格自然生成首次问候）
+        greeting_text = ""
+        if character.greeting_style:
+            greeting_text = f"\n【初识态度】{character.greeting_style}"
+
         # 对话示例
         examples_text = self._format_examples(character.speech_examples)
 
@@ -209,6 +220,7 @@ class PromptBuilder:
             char_avatar=avatar_text,
             char_conflict=conflict_text,
             char_soft_spots=soft_text,
+            char_greeting=greeting_text,
             char_examples=examples_text,
             char_relevant_lines=lines_text,
             char_forbidden=forbidden_text,
@@ -218,7 +230,7 @@ class PromptBuilder:
             relationship_stage=stage,
             shared_topics=shared_topics,
             dialogue_max_length=max_len,
-            dialogue_max_questions=max_q,
+            dialogue_max_questions=f"单轮对话自然延续即可，不必刻意限制问句数量。",
             action_description_rule=action_rule,
             current_time=now,
         )

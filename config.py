@@ -82,7 +82,7 @@ DEFAULT_CONFIG = {
     },
     # ---- 对话 ----
     "dialogue": {
-        "max_response_length": 60,
+        "max_response_length": 100,
         "enable_action_description": True,
     },
     # ---- 安全 ----
