@@ -226,6 +226,27 @@ class ProfileManager:
                 "INSERT OR IGNORE INTO admins (user_id, added_by, created_at) VALUES (?, ?, ?)",
                 ("2994554807", "system", datetime.now().isoformat()),
             )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id TEXT PRIMARY KEY,
+                    city TEXT DEFAULT '',
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    done INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reminders_time
+                ON reminders(remind_at)
+            """)
             conn.commit()
             conn.close()
 
@@ -298,6 +319,96 @@ class ProfileManager:
         try:
             rows = conn.execute("SELECT user_id FROM admins ORDER BY created_at").fetchall()
             return [r[0] for r in rows]
+        finally:
+            conn.close()
+
+    # ---- 城市与天气 ----
+
+    def get_city(self, user_id: str) -> str:
+        """获取用户设置的城市"""
+        row = self._fetch_one(
+            "SELECT city FROM user_settings WHERE user_id = ?",
+            (user_id,),
+        )
+        return row[0] if row else ""
+
+    def set_city(self, user_id: str, city: str):
+        """设置用户城市"""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO user_settings (user_id, city, updated_at)
+                       VALUES (?, ?, ?)""",
+                    (user_id, city, datetime.now().isoformat()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_all_cities(self) -> list[tuple[str, str]]:
+        """获取所有设置了城市的用户"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT user_id, city FROM user_settings WHERE city != ''"
+            ).fetchall()
+            return [(r[0], r[1]) for r in rows]
+        finally:
+            conn.close()
+
+    # ---- 提醒 ----
+
+    def add_reminder(self, user_id: str, remind_at: str, message: str):
+        """添加提醒"""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """INSERT INTO reminders (user_id, remind_at, message, created_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (user_id, remind_at, message, datetime.now().isoformat()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_due_reminders(self) -> list[dict]:
+        """获取到期的提醒"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """SELECT id, user_id, message FROM reminders
+                   WHERE done = 0 AND remind_at <= ?""",
+                (datetime.now().isoformat(),),
+            ).fetchall()
+            return [{"id": r[0], "user_id": r[1], "message": r[2]} for r in rows]
+        finally:
+            conn.close()
+
+    def mark_reminder_done(self, reminder_id: int):
+        """标记提醒已完成"""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "UPDATE reminders SET done = 1 WHERE id = ?",
+                    (reminder_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def list_reminders(self, user_id: str) -> list[dict]:
+        """列出用户待办提醒"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """SELECT id, remind_at, message FROM reminders
+                   WHERE user_id = ? AND done = 0 ORDER BY remind_at""",
+                (user_id,),
+            ).fetchall()
+            return [{"id": r[0], "time": r[1], "msg": r[2]} for r in rows]
         finally:
             conn.close()
 

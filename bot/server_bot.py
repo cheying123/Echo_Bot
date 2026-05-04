@@ -26,6 +26,7 @@ import websockets
 from websockets.server import WebSocketServer
 
 from core.engine import DialogueEngine
+from core.scheduler import Scheduler, parse_reminder_time
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,8 @@ class QQBotServer:
         # 主动对话配置
         self._proactive_interval = 60 * 60 * 2  # 默认 2 小时无消息则主动说话
         self._proactive_check = 60 * 10  # 每 10 分钟检查一次
+        # 定时任务
+        self._scheduler: Optional[Scheduler] = None
 
     # ---- 生命周期 ----
 
@@ -79,8 +82,14 @@ class QQBotServer:
             ping_timeout=10,
             max_size=2 ** 20,  # 1MB 消息上限
         ):
-            # 同时启动主动对话后台任务
+            # 启动后台任务
             asyncio.ensure_future(self._proactive_loop())
+            # 启动定时任务（天气预报 + 日程提醒）
+            self._scheduler = Scheduler(
+                self.engine.profile_mgr,
+                self._send_notification,
+            )
+            asyncio.ensure_future(self._scheduler.start())
             await asyncio.Future()
 
     async def stop(self):
@@ -206,6 +215,12 @@ class QQBotServer:
             await self._cmd_profile(bind_key, event)
         elif action in ("status", "状态", "mood"):
             await self._cmd_status(bind_key, event)
+        elif action in ("setcity", "城市"):
+            await self._cmd_setcity(bind_key, arg, event)
+        elif action in ("remind", "提醒", "reminder"):
+            await self._cmd_remind(bind_key, arg, event)
+        elif action in ("listremind", "我的提醒"):
+            await self._cmd_list_remind(bind_key, event)
         elif action in ("stats", "统计"):
             await self._cmd_stats(bind_key, event)
         elif action == "reload":
@@ -305,8 +320,77 @@ class QQBotServer:
             "首次使用：/roles 查看角色 → /switch 露西亚 选择 → 开始聊天\n"
             "管理员: /admin list / admin add / admin remove\n"
             "       /reload 重新加载角色卡\n"
-            "       /stats 查看运行统计"
+            "       /stats 查看运行统计\n"
+            "生活: /setcity <城市> 设置城市（推送天气）\n"
+            "      /remind <时间> <事项> 设置提醒\n"
+            "      /listremind 查看待办提醒"
         ))
+
+    # ---- 城市与提醒 ----
+
+    async def _cmd_setcity(self, bind_key: str, arg: str, event: dict):
+        if not arg:
+            await self._reply(event, "用法: /setcity <城市名>，例如 /setcity 北京")
+            return
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+        self.engine.profile_mgr.set_city(user_id, arg.strip())
+        await self._reply(event, f"已设置城市为「{arg.strip()}」，每天早上 7 点推送天气预报。")
+
+    async def _cmd_remind(self, bind_key: str, arg: str, event: dict):
+        if not arg:
+            await self._reply(event, "用法: /remind <时间> <事项>，例如 /remind 明天早上8点 开会")
+            return
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+        # 尝试分割时间和事项
+        dt_str = arg
+        msg_str = ""
+        # 尝试匹配引号或自然分割
+        parts = arg.split(maxsplit=1)
+        if len(parts) >= 2:
+            time_text = parts[0]
+            content = parts[1]
+            parsed = parse_reminder_time(time_text)
+            if parsed:
+                self.engine.profile_mgr.add_reminder(user_id, parsed, content)
+                await self._reply(event, f"已设置提醒：{time_text} {content}")
+                return
+        # 全段尝试解析
+        parsed = parse_reminder_time(arg)
+        if parsed:
+            await self._reply(event, f"已设置提醒：{arg}")
+            self.engine.profile_mgr.add_reminder(user_id, parsed, arg)
+        else:
+            await self._reply(event, "无法识别时间，试试「明天早上8点 开会」这样的格式")
+
+    async def _cmd_list_remind(self, bind_key: str, event: dict):
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+        reminders = self.engine.profile_mgr.list_reminders(user_id)
+        if not reminders:
+            await self._reply(event, "暂无待办提醒。")
+            return
+        lines = ["待办提醒:"]
+        for r in reminders:
+            lines.append(f"  [{r['time'][:16]}] {r['msg']}")
+        await self._reply(event, "\n".join(lines))
+
+    async def _send_notification(self, user_id: str, text: str):
+        """发送通知消息到用户（被调度器调用）"""
+        if not self._ws:
+            logger.warning("通知发送失败：WebSocket 未连接")
+            return
+        try:
+            action = {
+                "action": "send_msg",
+                "params": {
+                    "message_type": "private",
+                    "user_id": int(user_id),
+                    "message": text,
+                },
+            }
+            await self._ws.send(json.dumps(action))
+            logger.info("通知已发送 user=%s", user_id)
+        except Exception as e:
+            logger.error("发送通知失败: %s", e)
 
     # ---- 统计与重载 ----
 
@@ -462,8 +546,10 @@ class QQBotServer:
                 now = datetime.now()
                 threshold = timedelta(seconds=self._proactive_interval)
 
-                # 遍历所有有绑定的会话
+                # 遍历所有有绑定的会话（只对私聊生效）
                 for bind_key, event in list(self._last_events.items()):
+                    if bind_key.startswith("group_"):
+                        continue  # 群聊不主动说话
                     char_id = self._get_user_character(bind_key)
                     if not char_id or not self._ws:
                         continue
