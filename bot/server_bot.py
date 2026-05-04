@@ -265,12 +265,13 @@ class QQBotServer:
     async def _cmd_help(self, event: dict):
         await self._reply(event, (
             "可用命令:\n"
-            "  /switch <角色名>  切换角色\n"
-            "  /roles            查看可用角色\n"
-            "  /status           当前情绪/关系/语气\n"
-            "  /profile          查看用户画像\n"
+            "  /switch <角色名>  切换当前角色\n"
+            "  /roles            查看所有可用角色\n"
+            "  /status           查看角色对你的情绪/关系/语气\n"
+            "  /profile          查看你的详细画像\n"
             "  /help             显示此帮助\n"
-            "\n直接发送消息与当前角色对话。"
+            "\n直接发送消息与当前角色对话即可。\n"
+            "首次使用：/roles 查看角色 → /switch 露西亚 选择 → 开始聊天"
         ))
 
     # ---- go-cqhttp API 调用 ----
