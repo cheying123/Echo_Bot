@@ -145,10 +145,22 @@ class QQBotServer:
 
         character_id = self._get_user_character(bind_key)
         if not character_id:
-            hint = "你还没有绑定角色，请发送 /roles 查看可用角色，/switch <角色名> 选择。"
-            if msg_type == "group":
-                hint = "@我 " + hint
-            await self._reply(event, hint)
+            # 默认绑定到露西亚
+            chars = self.engine.char_mgr.list_characters()
+            default = None
+            for c in chars:
+                if c["name"] == "露西亚":
+                    default = c
+                    break
+            if not default and chars:
+                default = chars[0]
+            if default:
+                character_id = default["id"]
+                self._set_user_character(bind_key, character_id)
+                await self._send_switch_greeting(event, character_id)
+                return
+            # 没有角色时提示
+            await self._reply(event, "暂无可用角色。")
             return
 
         # 调用引擎
@@ -366,10 +378,10 @@ class QQBotServer:
                 "  /admin remove <QQ号>   移除管理员"
             ))
 
-    # ---- WebSocket 回复 ----
+    # ---- WebSocket 回复（含多段拆分） ----
 
     async def _reply(self, event: dict, text: str):
-        """通过 WebSocket 发送回复"""
+        """通过 WebSocket 发送回复（自动拆分多段 + 群聊 @）"""
         if not self._ws:
             logger.warning("WebSocket 未连接，无法发送回复")
             return
@@ -378,25 +390,83 @@ class QQBotServer:
         user_id = event.get("user_id")
         self._msg_id += 1
 
-        # 构造 OneBot v11 发送消息动作
-        action = {
-            "action": "send_msg",
-            "params": {
-                "message_type": msg_type,
-                "message": text,
-            },
-            "echo": f"reply_{self._msg_id}",
-        }
+        # 拆分为多个片段，模拟角色自然停顿
+        segs = self._split_message(text)
 
-        if msg_type == "group":
-            action["params"]["group_id"] = event.get("group_id")
-        else:
-            action["params"]["user_id"] = user_id
+        for i, seg in enumerate(segs):
+            final_text = seg
 
-        try:
-            await self._ws.send(json.dumps(action))
-        except Exception as e:
-            logger.error("WebSocket 发送消息失败: %s", e)
+            # 首段群聊加 @
+            if i == 0 and msg_type == "group" and user_id and not seg.startswith("[CQ:at"):
+                final_text = f"[CQ:at,qq={user_id}] {seg}"
+
+            action = {
+                "action": "send_msg",
+                "params": {
+                    "message_type": msg_type,
+                    "message": final_text,
+                },
+                "echo": f"reply_{self._msg_id}",
+            }
+
+            if msg_type == "group":
+                action["params"]["group_id"] = event.get("group_id")
+            else:
+                action["params"]["user_id"] = user_id
+
+            try:
+                await self._ws.send(json.dumps(action))
+            except Exception as e:
+                logger.error("WebSocket 发送消息失败: %s", e)
+                return
+
+            # 片段之间停顿 0.6-1.2 秒，模拟思考节奏
+            if i < len(segs) - 1:
+                await asyncio.sleep(0.6 + (i * 0.2))
+
+    @staticmethod
+    def _split_message(text: str) -> list[str]:
+        """将一段话拆成多个片段，模拟角色停顿"""
+        import re
+
+        # 短文本不拆
+        if len(text) < 25:
+            return [text]
+
+        # 找拆分的候选位置：动作描写 *...* 或长停顿 …… ——
+        candidates = []
+
+        # 在动作描写 *...* 前后拆分
+        for m in re.finditer(r'\*[^*]+\*', text):
+            # 动作描写前面的内容够长才拆
+            before = text[:m.start()].strip()
+            after = text[m.end():].strip()
+            if len(before) >= 8 and len(after) >= 8:
+                # 在动作描写后拆（动作归前段还是后段？根据位置定）
+                # 如果动作在前半段，动作归后段；在后半段，动作归前段
+                if m.start() < len(text) / 2:
+                    candidates.append(m.end())
+                else:
+                    candidates.append(m.start())
+
+        # 在句末停顿处拆分
+        for m in re.finditer(r'[。？！……]', text):
+            pos = m.end()
+            rest = text[pos:].strip()
+            if 8 <= len(text[:pos]) <= len(text) - 8 and len(rest) >= 6:
+                candidates.append(pos)
+
+        if not candidates:
+            return [text]
+
+        # 选最中间的分界点（避免拆出过短片段）
+        mid = len(text) / 2
+        split_at = min(candidates, key=lambda x: abs(x - mid))
+
+        part1 = text[:split_at].strip()
+        part2 = text[split_at:].strip()
+
+        return [part1, part2] if len(part1) >= 6 and len(part2) >= 6 else [text]
 
     # ---- 辅助 ----
 
