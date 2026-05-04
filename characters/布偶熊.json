@@ -138,11 +138,5 @@
     "allow_action_description": true,
     "max_questions_per_turn": 1
   },
-  "sticker_pack": [
-    "https://picsum.photos/seed/sticker1/200/200",
-    "https://picsum.photos/seed/sticker2/200/200",
-    "https://picsum.photos/seed/sticker3/200/200",
-    "https://picsum.photos/seed/sticker4/200/200",
-    "https://picsum.photos/seed/sticker5/200/200"
-  ]
+  "sticker_pack": []
 }

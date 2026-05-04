@@ -26,6 +26,7 @@ import websockets
 from websockets.server import WebSocketServer
 
 from core.engine import DialogueEngine
+from core.plugin_manager import PluginManager
 from core.scheduler import Scheduler, parse_reminder_time
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,10 @@ class QQBotServer:
         self.engine = engine
         self.host = host
         self.ws_port = ws_port
+
+        # 插件系统
+        self.plugin_mgr = PluginManager("plugins")
+        self.plugin_mgr.load_all()
 
         # 消息 ID 自增（用于 echo）
         self._msg_id = 0
@@ -82,6 +87,8 @@ class QQBotServer:
             ping_timeout=10,
             max_size=2 ** 20,  # 1MB 消息上限
         ):
+            # 插件启动钩子
+            asyncio.ensure_future(self.plugin_mgr.dispatch_startup())
             # 启动后台任务
             asyncio.ensure_future(self._proactive_loop())
             # 启动定时任务（天气预报 + 日程提醒）
@@ -194,7 +201,10 @@ class QQBotServer:
             )
             if reply:
                 reply = await self._attach_sticker(reply, character_id)
-                await self._reply(event, reply)
+                # 插件消息钩子
+                reply = await self.plugin_mgr.dispatch_message(event, reply)
+                if reply:
+                    await self._reply(event, reply)
         except Exception as e:
             logger.error("处理消息异常 user=%s: %s", user_id, e)
             await self._reply(event, "（暂时无法回应……）")
@@ -207,6 +217,11 @@ class QQBotServer:
         parts = cmd.split(maxsplit=1)
         action = parts[0] if parts else ""
         arg = parts[1] if len(parts) > 1 else ""
+
+        # 插件命令优先处理
+        handled = await self.plugin_mgr.dispatch_command(action, arg, event, bind_key)
+        if handled:
+            return
 
         # 中文命令优先，英文别名向后兼容
         if action in ("切换", "switch", "char", "选择"):

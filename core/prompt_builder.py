@@ -245,7 +245,7 @@ class PromptBuilder:
             dialogue_max_length=max_len,
             dialogue_max_questions=f"单轮对话自然延续即可，不必刻意限制问句数量。",
             action_description_rule=action_rule,
-            sticker_rule=sticker_rule or "当前角色无专属表情包，不需要使用。",
+            sticker_rule=sticker_rule or "",
             current_time=now,
         )
 
