@@ -1,366 +1,255 @@
-# Echo_Bot — AI 角色扮演 QQ 机器人
+# Echo_Bot
 
-一个能扮演不同角色、学习用户性格、动态调整说话方式的 QQ 聊天机器人。
+AI 角色扮演聊天机器人，专为 QQ 设计。可扮演不同角色、学习用户性格、动态调整说话方式。
 
-> **核心理念**：角色不只是回答问题的外壳，而是有记忆、有成长、能真正和人建立关系的数字存在。
+[![GitHub](https://img.shields.io/badge/GitHub-Echo_Bot-blue)](https://github.com/cheying123/Echo_Bot)
 
 ---
 
-## 目录
+## 快速导航
 
-- [系统架构](#系统架构)
-- [核心功能](#核心功能)
 - [快速开始](#快速开始)
-- [QQ 机器人部署](#qq-机器人部署)
+- [命令大全](#命令大全)
 - [角色系统](#角色系统)
-- [记忆与学习机制](#记忆与学习机制)
-- [配置说明](#配置说明)
-- [可用命令](#可用命令)
+- [记忆与好感度](#记忆与好感度)
+- [QQ 部署](#qq-部署)
+- [插件开发](#插件开发)
+- [管理面板](#管理面板)
 - [Docker 部署](#docker-部署)
-- [项目结构](#项目结构)
-
----
-
-## 系统架构
-
-Echo_Bot 采用三层分离架构：
-
-```
-┌─────────────────────────────────────────────────┐
-│  Layer 1: 角色卡 (Character Card)                │
-│  纯 JSON 文件，可随时替换，一个角色一个文件          │
-│  性格、说话风格、知识边界、台词库                    │
-├─────────────────────────────────────────────────┤
-│  Layer 2: 核心引擎 (Core Engine)                  │
-│  固定提示词框架 + 对话编排 + LLM 调用               │
-│  角色扮演协议、动态适配规则、记忆提取逻辑              │
-├─────────────────────────────────────────────────┤
-│  Layer 3: 用户档案 (User Profile)                 │
-│  SQLite 存储，按用户+角色隔离                      │
-│  性格标签、情绪历史、关系阶段、对话摘要               │
-└─────────────────────────────────────────────────┘
-```
-
-### 数据流
-
-```
-用户消息 → 构建提示词 → LLM API → 解析回复
-    ↑                        ↓
-用户档案 ←────────── MEMORY 块解析 → 合并画像
-    ↑
-台词检索 ← 角色台词库（相似度匹配 Top-5）
-```
-
----
-
-## 核心功能
-
-### 🎭 角色扮演
-- 任意切换角色，每个角色有独立的**性格、说话风格、知识边界、世界观**
-- 角色卡为纯 JSON 文件，热加载，随时可以增删改
-
-### 🧠 记忆系统
-- **短期记忆**：保留最近对话原文（默认 8 轮）
-- **中期记忆**：每 10 轮由 AI 生成对话摘要
-- **长期记忆**：每轮提取用户特征，累积到画像中
-- **记忆隔离**：不同角色的记忆完全独立，互不干扰
-
-### 📖 台词学习（RAG）
-- 角色卡可内置原作台词库
-- 每次对话前检索与当前话题最相关的台词
-- 注入提示词中供 AI 参考，让回复更贴合原作
-
-### 🔄 动态适配
-根据对用户的了解，自动调整：
-
-| 维度 | 变化方式 |
-|---|---|
-| 关系阶段 | 陌生人 → 初识 → 熟悉 → 亲密 → 挚友（对话轮数和好感度决定） |
-| 说话语气 | 根据用户情绪和性格特征调整 |
-| 话题选择 | 记录用户感兴趣和反感的话题 |
-| 情绪回应 | 检测到负面情绪时优先关怀 |
+- [系统架构](#系统架构)
 
 ---
 
 ## 快速开始
 
-### 前置需求
-
-- Python 3.10+
-- 一个 AI API 的 Key（支持 DeepSeek / 通义千问 / Moonshot / OpenAI 等）
-
-### 安装与运行
-
 ```bash
-# 1. 克隆项目
-git clone https://github.com/cheying123/Echo_Bot.git
-cd Echo_Bot
-
-# 2. 安装依赖
+# 1. 安装依赖
 pip install -r requirements.txt
 
-# 3. 配置 API Key
+# 2. 配置 API Key
 echo "AIBOT_LLM__API_KEY=sk-your-key" >> .env
-echo "AIBOT_LLM__PROVIDER=qwen" >> .env      # 可选：deepseek / moonshot / qwen / openai
+echo "AIBOT_LLM__PROVIDER=qwen" >> .env
 
-# 4. 启动终端测试模式
-python main.py
-```
-
-启动后选一个角色，直接开始对话：
-
-```
-可用角色：
-  1. 布偶熊 [战双帕弥什] — 傲娇、腹黑、吐槽役
-  2. 露西亚 [战双帕弥什] — 坚定沉稳、温柔细腻
-  3. 林黛玉 [红楼梦] — 聪慧敏感、多愁善感
-  4. 绫波丽 [新世纪福音战士] — 三无少女、冷静
-
-输入角色编号或名称:
-```
-
----
-
-## QQ 机器人部署
-
-### 方案一：LLOneBot（推荐，Windows 用）
-
-1. 下载安装 [QQ NT 版](https://im.qq.com/)
-2. 下载 [LLOneBot](https://github.com/LLOneBot/LLOneBot/releases/latest)
-3. 解压到 QQ 插件目录 `C:\Users\用户名\AppData\Local\QQNT\plugins\`
-4. 启动 QQ，登录机器人小号
-5. 在 LLOneBot 设置中添加反向 WebSocket：`ws://你的服务器IP:8765`
-
-### 方案二：go-cqhttp（Linux 用）
-
-```yaml
-# go-cqhttp config.yml
-account:
-  uin: 你的QQ号
-  password: '你的密码'
-servers:
-  - ws-reverse:
-      universal: ws://127.0.0.1:8765
-```
-
-### 服务器端启动
-
-```bash
-# 终端测试
+# 3. 启动终端测试
 python main.py
 
-# QQ 机器人服务
+# 4. 或者启动 QQ 机器人服务
 python main.py --bot server
 ```
 
----
-
-## 角色系统
-
-### 角色卡结构
-
-角色卡是 JSON 文件，放在 `characters/` 目录下，重启后自动加载。
-
-```json
-{
-  "name": "角色名",
-  "source": "出处作品",
-  "personality": {
-    "core_traits": ["标签1", "标签2"],
-    "speaking_style": "说话风格描述（最重要）",
-    "habits": ["习惯动作"],
-    "emotional_range": "情绪表达范围"
-  },
-  "knowledge_boundary": {
-    "knows": ["角色应该知道的事物"],
-    "does_not_know": ["角色不应该知道的事物"],
-    "worldview": "角色所处的世界观"
-  },
-  "speech_examples": [
-    {"user": "用户说的话", "response": "角色的回应"}
-  ],
-  "source_dialogues": [
-    "角色在原作中的台词1",
-    "角色在原作中的台词2"
-  ],
-  "greeting_style": "初次接触时的态度风格描述",
-  "avatar_description": "外貌描述",
-  "relationship_with_user_default": "warm",
-  "conflict_triggers": ["触发情绪波动的话题"],
-  "soft_spots": ["角色软肋"],
-  "forbidden": ["角色不能做的事"],
-  "dialogue_config": {
-    "max_length": 60,
-    "allow_action_description": true
-  }
-}
-```
-
-### 添加新角色
-
-1. 在 `characters/` 目录下新建 `.json` 文件
-2. 至少填写 `name`、`personality.core_traits`、`personality.speaking_style`、`speech_examples`
-3. 重启程序即可在角色列表中看到
-4. 台词越多，AI 模仿越像
-
----
-
-## 记忆与学习机制
-
-### 学习流程
-
-```
-每轮对话后，AI 输出 MEMORY 块：
-{
-  "observations": {
-    "new_traits": ["喜欢自嘲"],
-    "mood": "positive",
-    "interests_mentioned": ["编程"],
-    "speech_pattern": "简短直接"
-  },
-  "relationship": {
-    "trust_signal": "提升",
-    "affection_signal": "维持"
-  },
-  "strategy_adjustments": {
-    "next_tone": "可以更随意",
-    "topics_to_explore": ["游戏"]
-  }
-}
-```
-
-- 特征标签累积去重
-- 情绪记录最近 30 条用于趋势分析
-- 关系阶段由后端按规则晋升（不依赖 AI 判断）
-- 记忆提取间隔可配置，默认每 3 轮一次
-
-### 记忆隔离
-
-```
-用户A（QQ号 111）
-├── 角色X
-│   ├── 关系阶段: 熟悉
-│   ├── 兴趣: ["编程", "动漫"]
-│   └── 对话摘要: ...
-├── 角色Y
-│   ├── 关系阶段: 陌生人
-│   └── 对话摘要: ...
-用户B（QQ号 222）
-└── 角色X
-    ├── 关系阶段: 初识
-    └── ...
-```
-
----
-
-## 配置说明
-
-### 优先级
-
-```
-代码默认值 < config.yml < 环境变量 < .env 文件
-```
-
-### 核心配置项
-
-| 配置 | 环境变量 | 说明 |
-|---|---|---|
-| AI 供应商 | `AIBOT_LLM__PROVIDER` | qwen / deepseek / moonshot / openai |
-| API Key | `AIBOT_LLM__API_KEY` | 建议用 .env 设置 |
-| 模型名 | `AIBOT_LLM__MODEL` | 不填则用厂商预设 |
-| API 地址 | `AIBOT_LLM__BASE_URL` | 不填则用厂商预设 |
-| 代理 | `HTTP_PROXY` | 访问外网 API 时使用 |
-
-### 支持的 AI 厂商
+支持的 AI 厂商一键切换（改 `.env` 的 `AIBOT_LLM__PROVIDER`）：
 
 | provider | 厂商 | 默认模型 | 国内直连 |
 |---|---|---|---|
 | `qwen` | 阿里通义千问 | qwen-plus | ✅ |
 | `deepseek` | DeepSeek | deepseek-chat | ✅ |
 | `moonshot` | Moonshot/Kimi | moonshot-v1-8k | ✅ |
-| `hunyuan` | 腾讯混元 | hunyuan-standard | ✅ |
 | `openai` | OpenAI | gpt-4o-mini | ❌ 需代理 |
 | `ollama` | 本地部署 | qwen2.5:7b | ✅ |
 
 ---
 
-## 可用命令
+## 命令大全
+
+### 🎭 角色
 
 | 命令 | 说明 |
 |---|---|
-| `/switch <角色名>` | 切换当前对话角色 |
-| `/roles` | 查看所有可用角色 |
-| `/status` | 查看角色对你的情绪、关系阶段、语气建议 |
-| `/profile` | 查看详细用户画像（性格标签、兴趣、好感度等） |
-| `/help` | 显示帮助 |
+| `/切换 <角色名>` | 切换到指定角色 |
+| `/角色` | 查看所有可用角色 |
+| `/状态` | 查看角色对你的情绪、关系阶段、语气建议 |
+| `/档案` | 查看详细画像（性格标签、兴趣、好感度） |
 
-私聊直接发送命令即可。群聊需要 @机器人后发送命令。
+### ☀️ 生活
+
+| 命令 | 说明 |
+|---|---|
+| `/设置城市 <城市>` | 设置所在城市，每日推送天气预报 |
+| `/天气 on/off` | 开关天气预报推送 |
+| `/天气 time <小时>` | 设置天气预报推送时间（默认 8 点） |
+| `/提醒 <时间> <事项>` | 设置日程提醒 |
+| `/提醒 on/off` | 开关日程提醒 |
+| `/待办` | 查看待办提醒列表 |
+
+时间格式：`明天早上8点` `今天下午3点` `5分钟后` `后天`
+
+### 🔧 管理员
+
+| 命令 | 说明 |
+|---|---|
+| `/管理员 list` | 查看管理员列表 |
+| `/管理员 add <QQ号>` | 添加管理员 |
+| `/管理员 remove <QQ号>` | 移除管理员 |
+| `/重载` | 重新加载角色卡（无需重启容器） |
+| `/统计` | 查看运行统计数据 |
+| `/添加角色` | 查看添加角色指引 |
+| `/删除角色 <名>` | 删除指定角色 |
+
+---
+
+## 角色系统
+
+角色卡是 JSON 文件，放在 `characters/` 目录下：
+
+```json
+{
+  "name": "露西亚",
+  "source": "战双帕弥什",
+  "personality": {
+    "core_traits": ["坚定沉稳", "温柔细腻"],
+    "speaking_style": "语气坚定而温柔..."
+  },
+  "speech_examples": [
+    {"user": "你好", "response": "（角色的回应）"}
+  ],
+  "source_dialogues": [
+    "角色在原作中的台词..."
+  ],
+  "sticker_pack": [
+    "https://图片URL.png"
+  ]
+}
+```
+
+**添加角色：**
+```bash
+python add_character.py --template -n "角色名" -s "出处"
+```
+或通过管理面板网页添加。
+
+---
+
+## 记忆与好感度
+
+| 机制 | 说明 |
+|---|---|
+| 短期记忆 | 保留最近若干轮对话原文 |
+| 长期记忆 | 性格标签、兴趣、情绪历史累积 |
+| 好感度 | 1-10，随对话增加，说话语气随之变化 |
+| 关系阶段 | 陌生人 → 初识 → 熟悉 → 亲密 → 挚友 |
+| 记忆隔离 | 不同角色 × 不同群聊的记忆互不干扰 |
+| 主动对话 | 长时间不说话，角色会主动找话题（仅私聊） |
+
+---
+
+## QQ 部署
+
+### 方案一：LLOneBot（Windows 推荐）
+
+1. 安装 [QQ NT 版](https://im.qq.com/)
+2. 下载 [LLOneBot](https://github.com/LLOneBot/LLOneBot/releases)
+3. 解压到 `C:\Users\用户名\AppData\Local\QQNT\plugins\`
+4. 重启 QQ，进入 LLOneBot 设置
+5. 添加反向 WebSocket：`ws://你的服务器IP:8765`
+6. 在 QQ 中发送 `/帮助` 开始使用
+
+### 方案二：go-cqhttp（Linux）
+
+```yaml
+# go-cqhttp config.yml
+account:
+  uin: 你的QQ号
+  password: '密码'
+servers:
+  - ws-reverse:
+      universal: ws://127.0.0.1:8765
+```
+
+---
+
+## 插件开发
+
+在 `plugins/` 目录下创建 `.py` 文件：
+
+```python
+from core.plugin_manager import Plugin
+
+class MyPlugin(Plugin):
+    name = "myplugin"
+    version = "1.0"
+    description = "我的第一个插件"
+
+    async def on_startup(self):
+        print("插件已加载")
+
+    async def on_command(self, cmd, args, event, bind_key):
+        if cmd == "ping":
+            await self.reply(event, "pong!")
+            return True  # 返回 True 表示命令已处理
+
+    async def on_message(self, event, reply):
+        # 可修改回复内容
+        return reply
+
+    def get_commands(self):
+        # 插件的命令会出现在 /帮助 中
+        return [{"cmd": "ping", "desc": "测试插件是否工作"}]
+```
+
+重启后自动加载。
+
+---
+
+## 管理面板
+
+```bash
+# 启动 Web 管理界面
+python web/dashboard.py
+
+# 浏览器访问
+# http://localhost:8766
+```
+
+功能：
+- 可视化管理角色（添加、编辑、删除）
+- 查看系统状态（API 调用次数、角色数量）
+- 查看插件列表
 
 ---
 
 ## Docker 部署
 
-### 构建并运行
-
 ```bash
+# 构建并启动
 docker compose up -d --build
+
+# 查看日志
+docker compose logs -f
+
+# 重启
+docker compose restart
 ```
-
-### 环境变量配置
-
-```bash
-cp .env.example .env
-# 编辑 .env 填入 API Key
-```
-
-### 生产部署建议
-
-- 数据库文件保存在 `./data` 目录下（已挂载卷）
-- 日志文件自动轮转，10MB 分割，保留 5 份
-- 健康检查每 30 秒一次
 
 ---
 
-## 项目结构
+## 系统架构
 
 ```
 Echo_Bot/
-├── main.py                        # 程序入口
-├── config.py                      # 配置管理
-├── config.yml                     # 默认配置文件
-├── requirements.txt               # Python 依赖
-├── .env.example                   # 环境变量模板
-├── Dockerfile                     # Docker 构建
-├── docker-compose.yml             # Docker 编排
-│
-├── characters/                    # 角色卡目录
-│   ├── 布偶熊.json                  # 战双帕弥什
-│   ├── 露西亚-誓焰.json              # 战双帕弥什
-│   ├── 林黛玉.json                  # 红楼梦
-│   └── 绫波丽.json                  # EVA
-│
-├── core/                          # 核心引擎
-│   ├── engine.py                  # 对话编排主逻辑
-│   ├── models.py                  # 数据模型（Pydantic）
-│   ├── character_manager.py       # 角色卡管理
-│   ├── profile_manager.py         # 用户档案（SQLite）
-│   ├── prompt_builder.py          # 提示词构建
-│   ├── memory_parser.py           # MEMORY 解析
-│   ├── context_manager.py         # 短期对话上下文
-│   ├── llm_client.py              # LLM API 客户端
-│   └── retriever.py               # 台词检索
-│
-├── bot/                           # 机器人前端
-│   ├── console_bot.py             # 终端交互模式
-│   └── server_bot.py              # QQ 机器人服务
-│
-└── data/                          # 运行时数据
-    ├── bot.db                     # 用户画像数据库
-    └── bot.log                    # 运行日志
+├── main.py                  # 程序入口
+├── config.py                # 配置管理
+├── add_character.py         # 角色添加工具
+├── characters/              # 角色卡 JSON
+├── plugins/                 # 插件目录
+│   └── __init__.py
+├── web/                     # 管理面板
+│   └── dashboard.py
+├── core/                    # 核心引擎
+│   ├── engine.py            # 对话引擎
+│   ├── models.py            # 数据模型
+│   ├── plugin_manager.py    # 插件系统
+│   ├── prompt_builder.py    # 提示词构建
+│   ├── profile_manager.py   # 用户档案(SQLite)
+│   ├── memory_parser.py     # MEMORY 解析
+│   ├── character_manager.py # 角色管理
+│   ├── context_manager.py   # 对话上下文
+│   ├── retriever.py         # 台词检索
+│   ├── scheduler.py         # 定时任务
+│   └── llm_client.py        # LLM API 客户端
+├── bot/                     # 机器人前端
+│   ├── console_bot.py       # 终端模式
+│   └── server_bot.py        # QQ 服务
+└── data/                    # 运行时数据
+    ├── bot.db               # 用户画像
+    └── bot.log              # 运行日志
 ```
-
----
-
-## License
-
-MIT
