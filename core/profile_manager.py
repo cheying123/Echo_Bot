@@ -256,6 +256,10 @@ class ProfileManager:
                 conn.execute("ALTER TABLE user_settings ADD COLUMN remind_on INTEGER DEFAULT 1")
             except Exception:
                 pass
+            try:
+                conn.execute("ALTER TABLE user_settings ADD COLUMN weather_time INTEGER DEFAULT 8")
+            except Exception:
+                pass
             conn.commit()
             conn.close()
 
@@ -360,6 +364,24 @@ class ProfileManager:
             "SELECT weather_on FROM user_settings WHERE user_id = ?", (user_id,)
         )
         return bool(row[0]) if row else True
+
+    def get_weather_time(self, user_id: str) -> int:
+        row = self._fetch_one(
+            "SELECT weather_time FROM user_settings WHERE user_id = ?", (user_id,)
+        )
+        return int(row[0]) if row else 8
+
+    def set_weather_time(self, user_id: str, hour: int):
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO user_settings (user_id, city, weather_on, weather_time, updated_at) VALUES (?, COALESCE((SELECT city FROM user_settings WHERE user_id = ?), ''), COALESCE((SELECT weather_on FROM user_settings WHERE user_id = ?), 1), ?, ?)",
+                    (user_id, user_id, user_id, hour, datetime.now().isoformat()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
     def set_weather_on(self, user_id: str, on: bool):
         with self._lock:

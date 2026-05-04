@@ -333,16 +333,28 @@ class QQBotServer:
 
     async def _cmd_weather(self, bind_key: str, arg: str, event: dict):
         user_id = bind_key.replace("private_", "").replace("group_", "")
-        cmd = arg.strip().lower()
-        if cmd in ("on", "开", "开启"):
+        parts = arg.strip().lower().split(maxsplit=1)
+        sub = parts[0] if parts else ""
+        val = parts[1] if len(parts) > 1 else ""
+
+        if sub in ("on", "开", "开启"):
             self.engine.profile_mgr.set_weather_on(user_id, True)
-            await self._reply(event, "天气预报已开启，每天早上 7 点推送。")
-        elif cmd in ("off", "关", "关闭"):
+            t = self.engine.profile_mgr.get_weather_time(user_id)
+            await self._reply(event, f"天气预报已开启，每天早上 {t} 点推送。")
+        elif sub in ("off", "关", "关闭"):
             self.engine.profile_mgr.set_weather_on(user_id, False)
             await self._reply(event, "天气预报已关闭。")
+        elif sub in ("time", "时间"):
+            h = val.strip()
+            if h.isdigit() and 0 <= int(h) <= 23:
+                self.engine.profile_mgr.set_weather_time(user_id, int(h))
+                await self._reply(event, f"天气预报已设为每天 {h} 点推送。")
+            else:
+                await self._reply(event, "请输入 0-23 之间的小时数，如 /weather time 8")
         else:
             status = "开启" if self.engine.profile_mgr.get_weather_on(user_id) else "关闭"
-            await self._reply(event, f"天气预报当前状态: {status}\n/weather on 开启\n/weather off 关闭")
+            t = self.engine.profile_mgr.get_weather_time(user_id)
+            await self._reply(event, f"天气预报: {status} | 推送时间: 每天 {t} 点\n/weather on/off 开关\n/weather time <小时> 设置时间")
 
     async def _cmd_setcity(self, bind_key: str, arg: str, event: dict):
         if not arg:

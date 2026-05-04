@@ -48,23 +48,42 @@ class Scheduler:
     # ---- 天气预报 ----
 
     async def _weather_loop(self):
-        """每天早上 7:00 推送天气预报"""
+        """按用户设定的时间推送天气预报（每 30 分钟检查一次）"""
+        # 记录今天已发送的用户，避免重复
+        sent_today: set[str] = set()
+        last_check_day = datetime.now().day
+
+        await asyncio.sleep(60)
+
         while self._running:
             now = datetime.now()
-            target = now.replace(hour=7, minute=0, second=0, microsecond=0)
-            if now >= target:
-                target += timedelta(days=1)
 
-            wait_sec = (target - now).total_seconds()
-            await asyncio.sleep(wait_sec)
+            # 新的一天，重置记录
+            if now.day != last_check_day:
+                sent_today.clear()
+                last_check_day = now.day
 
-            if not self._running:
-                break
+            users = self.pm.get_all_cities()
+            async with httpx.AsyncClient(timeout=15) as client:
+                for user_id, city in users:
+                    if user_id in sent_today:
+                        continue
+                    if not self.pm.get_weather_on(user_id):
+                        continue
 
-            await self._send_weather_to_all()
+                    pref_hour = self.pm.get_weather_time(user_id)
+                    # 在用户设定的时间点（±5分钟窗口）发送
+                    if now.hour == pref_hour and now.minute < 10:
+                        try:
+                            weather = await self._fetch_weather(client, city)
+                            msg = f"☀️ 早安～\n{city}今日天气：{weather}"
+                            await self.send(user_id, msg)
+                            sent_today.add(user_id)
+                            logger.info("天气已推送 user=%s city=%s", user_id, city)
+                        except Exception as e:
+                            logger.error("发送天气失败 user=%s: %s", user_id, e)
 
-            # 发完后等 24 小时再发
-            await asyncio.sleep(24 * 3600)
+            await asyncio.sleep(1800)  # 每 30 分钟检查一次
 
     async def _send_weather_to_all(self):
         """给所有设置了城市的用户发天气"""
