@@ -91,6 +91,7 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 - {dialogue_max_questions} 不要让对话变成审问，但自然的问句不需要刻意限制。
 - {action_description_rule}
 - **不要总是你问我答**：对话是自然的，你可以补充自己的想法、主动分享感受、延续话题。每次回复不一定要等用户再开口，除非明显感觉到用户想结束对话。
+- **表情包**：{sticker_rule}
 - **说话节奏**：长回复中如果想表达停顿、思考或语气转换，用 `[pause]` 标记断句位置。程序会在 `[pause]` 处拆分消息逐条发送，模拟自然说话节奏。不要把整段话都打出来一次性发。
 
 ### 3.4 学习机制（关键）
@@ -211,6 +212,11 @@ class PromptBuilder:
         )
         action_rule = "可以适当使用动作描写（如*低头*、*侧过脸*）增强沉浸感，但不宜过多。" if action_enabled else "不要使用动作描写。"
 
+        # 表情包规则
+        sticker_rule = ""
+        if character.sticker_pack:
+            sticker_rule = "这个角色有表情包。在合适的时机用 [sticker] 发一张表情包，能增强对话表现力。不要每句都发，用在情绪到位的时候。"
+
         # ---- 当前时间 ----
         now = current_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -239,6 +245,7 @@ class PromptBuilder:
             dialogue_max_length=max_len,
             dialogue_max_questions=f"单轮对话自然延续即可，不必刻意限制问句数量。",
             action_description_rule=action_rule,
+            sticker_rule=sticker_rule or "当前角色无专属表情包，不需要使用。",
             current_time=now,
         )
 

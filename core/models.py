@@ -71,6 +71,7 @@ class CharacterCard(BaseModel):
 
     # 扩展（可选）
     greeting_style: Optional[str] = None  # 角色与人初次接触时的态度风格，用于AI参考，非固定台词
+    sticker_pack: List[str] = Field(default_factory=list)  # 表情包图片URL列表
     avatar_description: Optional[str] = None  # 外貌描述
     relationship_with_user_default: str = "neutral"  # neutral | warm | cold | wary
     development_arc: Optional[str] = None  # 角色成长弧

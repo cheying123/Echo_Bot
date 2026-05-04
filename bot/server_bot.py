@@ -193,6 +193,7 @@ class QQBotServer:
                 character_id=character_id,
             )
             if reply:
+                reply = await self._attach_sticker(reply, character_id)
                 await self._reply(event, reply)
         except Exception as e:
             logger.error("处理消息异常 user=%s: %s", user_id, e)
@@ -207,32 +208,37 @@ class QQBotServer:
         action = parts[0] if parts else ""
         arg = parts[1] if len(parts) > 1 else ""
 
-        if action in ("switch", "char", "选择"):
+        # 中文命令优先，英文别名向后兼容
+        if action in ("切换", "switch", "char", "选择"):
             await self._cmd_switch(bind_key, arg, event)
-        elif action in ("roles", "角色"):
+        elif action in ("角色", "roles"):
             await self._cmd_list_roles(event)
-        elif action in ("profile", "档案"):
+        elif action in ("档案", "profile"):
             await self._cmd_profile(bind_key, event)
-        elif action in ("status", "状态", "mood"):
+        elif action in ("状态", "status", "mood"):
             await self._cmd_status(bind_key, event)
-        elif action in ("setcity", "城市"):
+        elif action in ("设置城市", "setcity", "城市"):
             await self._cmd_setcity(bind_key, arg, event)
-        elif action in ("weather", "天气"):
+        elif action in ("天气", "weather"):
             await self._cmd_weather(bind_key, arg, event)
-        elif action in ("remind", "提醒", "reminder"):
+        elif action in ("提醒", "remind", "reminder"):
             await self._cmd_remind(bind_key, arg, event)
-        elif action in ("listremind", "我的提醒"):
+        elif action in ("待办", "listremind", "我的提醒"):
             await self._cmd_list_remind(bind_key, event)
-        elif action in ("stats", "统计"):
+        elif action in ("统计", "stats"):
             await self._cmd_stats(bind_key, event)
-        elif action == "reload":
+        elif action in ("添加角色", "addchar"):
+            await self._cmd_addchar(bind_key, event)
+        elif action in ("删除角色", "removechar", "del角色"):
+            await self._cmd_removechar(bind_key, arg, event)
+        elif action in ("重载", "reload"):
             await self._cmd_reload(bind_key, event)
-        elif action == "admin":
+        elif action in ("管理员", "admin"):
             await self._cmd_admin(bind_key, arg, event)
-        elif action == "help":
+        elif action in ("帮助", "help"):
             await self._cmd_help(event)
         else:
-            await self._reply(event, f"未知命令: /{action}。发送 /help 查看帮助。")
+            await self._reply(event, f"未知命令，发送 /帮助 查看可用命令。")
 
     async def _cmd_switch(self, bind_key: str, arg: str, event: dict):
         if not arg:
@@ -312,21 +318,24 @@ class QQBotServer:
 
     async def _cmd_help(self, event: dict):
         await self._reply(event, (
-            "可用命令:\n"
-            "  /switch <角色名>  切换当前角色\n"
-            "  /roles            查看所有可用角色\n"
-            "  /status           查看角色对你的情绪/关系/语气\n"
-            "  /profile          查看你的详细画像\n"
-            "  /help             显示此帮助\n"
-            "\n直接发送消息与当前角色对话即可。\n"
-            "首次使用：/roles 查看角色 → /switch 露西亚 选择 → 开始聊天\n"
-            "管理员: /admin list / admin add / admin remove\n"
-            "       /reload 重新加载角色卡\n"
-            "       /stats 查看运行统计\n"
-            "生活: /setcity <城市> 设置城市\n"
-            "      /weather on/off  开关天气预报\n"
-            "      /remind <时间> <事项> 设置提醒\n"
-            "      /listremind 查看待办提醒"
+            "🎭 角色\n"
+            "  /切换 <角色名>     切换角色\n"
+            "  /角色             查看可用角色\n"
+            "  /状态             情绪/关系/语气\n"
+            "  /档案             你的详细画像\n"
+            "\n☀️ 生活\n"
+            "  /设置城市 <城市>   设置城市\n"
+            "  /天气             天气预报开关/时间\n"
+            "  /提醒 <时间> <事>  设置提醒\n"
+            "  /待办             查看待办提醒\n"
+            "\n🔧 管理员\n"
+            "  /管理员 list/add/remove\n"
+            "  /重载             重载角色卡\n"
+            "  /添加角色         添加角色指引\n"
+            "  /删除角色 <名>    删除角色\n"
+            "  /统计             运行统计\n"
+            "\n💡 直接发消息和当前角色聊天\n"
+            "首次使用：/角色 → /切换 露西亚 → 聊天"
         ))
 
     # ---- 城市与提醒 ----
@@ -506,10 +515,26 @@ class QQBotServer:
         else:
             await self._reply(event, (
                 "管理员命令:\n"
-                "  /admin list            查看管理员列表\n"
-                "  /admin add <QQ号>      添加管理员\n"
-                "  /admin remove <QQ号>   移除管理员"
+                "  /管理员 list            查看列表\n"
+                "  /管理员 add <QQ号>      添加\n"
+                "  /管理员 remove <QQ号>   移除"
             ))
+
+    # ---- 表情包 ----
+
+    async def _attach_sticker(self, text: str, character_id: str) -> str:
+        """将 [sticker] 替换为角色表情包图片"""
+        if "[sticker]" not in text:
+            return text
+
+        card = self.engine.char_mgr.get_character(character_id)
+        if not card or not card.sticker_pack:
+            return text.replace("[sticker]", "").strip()
+
+        import random
+        url = random.choice(card.sticker_pack)
+        cq_code = f"[CQ:image,file={url}]"
+        return text.replace("[sticker]", cq_code).strip()
 
     # ---- WebSocket 回复（含多段拆分） ----
 
@@ -518,6 +543,10 @@ class QQBotServer:
         if not self._ws:
             logger.warning("WebSocket 未连接，无法发送回复")
             return
+
+        # 将 [face:ID] 转为 QQ 表情 CQ 码
+        import re
+        text = re.sub(r'\[face:(\d+)\]', r'[CQ:face,id=\1]', text)
 
         msg_type = event.get("message_type", "private")
         user_id = event.get("user_id")
@@ -557,12 +586,52 @@ class QQBotServer:
             if i < len(segs) - 1:
                 await asyncio.sleep(0.6 + (i * 0.2))
 
+    # ---- 角色管理 ----
+
+    async def _cmd_addchar(self, bind_key: str, event: dict):
+        """添加角色指引"""
+        await self._reply(event, (
+            "添加角色方法:\n"
+            "1. 在服务器上运行: python add_character.py --template -n \"角色名\" -s \"出处\"\n"
+            "2. 手动编辑生成的 JSON 文件\n"
+            "3. 管理员用 /reload 加载\n"
+            "或直接编辑 characters/ 目录下的 JSON 文件"
+        ))
+
+    async def _cmd_removechar(self, bind_key: str, arg: str, event: dict):
+        """删除角色（管理员）"""
+        user_id_num = bind_key.replace("private_", "").replace("group_", "")
+        if not self.engine.profile_mgr.is_admin(user_id_num):
+            await self._reply(event, "你没有权限执行此操作。")
+            return
+        if not arg:
+            await self._reply(event, "用法: /removechar <角色名>")
+            return
+
+        chars = self.engine.char_mgr.list_characters()
+        matched = None
+        for c in chars:
+            if arg == c["id"] or arg == c["name"]:
+                matched = c
+                break
+        if not matched:
+            await self._reply(event, f"未找到角色「{arg}」")
+            return
+
+        import os
+        from pathlib import Path
+        filepath = Path(self.engine.char_mgr._dir) / f"{matched['id']}.json"
+        if filepath.exists():
+            os.remove(filepath)
+            self.engine.char_mgr.reload()
+            await self._reply(event, f"已删除角色「{matched['name']}」")
+        else:
+            await self._reply(event, "角色文件不存在")
+
     @staticmethod
     def _split_message(text: str) -> list[str]:
-        """按 AI 标记的 [pause] 拆分消息，无标记则一条发送"""
         if "[pause]" not in text:
             return [text]
-
         parts = [p.strip() for p in text.split("[pause]") if p.strip()]
         return parts if parts else [text]
 
