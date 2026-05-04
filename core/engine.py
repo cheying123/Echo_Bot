@@ -88,6 +88,8 @@ class DialogueEngine:
         # 运行时统计
         self.total_calls = 0
         self.total_errors = 0
+        self.total_time = 0.0
+        self.total_tokens = 0
 
     # ---- 核心接口 ----
 
@@ -147,37 +149,28 @@ class DialogueEngine:
         # 6) 解析 MEMORY 块
         memory_block, clean_reply = extract_and_parse(raw_response)
 
-        # 7) 按间隔控制记忆提取
-        extraction_interval = self.cfg.memory.get("memory_extraction_interval", 3)
-        should_extract = (
-            memory_block is not None
-            and (char_memory.conversation_count + 1) % extraction_interval == 0
-        )
+        self.total_time += elapsed
 
-        if memory_block and should_extract:
-            self.profile_mgr.merge_memory_block(user_id, character_id, memory_block)
-            logger.debug("MEMORY 提取 user=%s mood=%s", user_id, memory_block.observations.mood)
-        elif memory_block:
-            logger.debug("跳过本轮记忆提取（interval=%d）", extraction_interval)
+        # 7) 记忆提取异步化（不阻塞回复）
+        if memory_block:
+            extraction_interval = self.cfg.memory.get("memory_extraction_interval", 3)
+            should_extract = (char_memory.conversation_count + 1) % extraction_interval == 0
+            if should_extract:
+                asyncio.ensure_future(self._async_merge_memory(
+                    user_id, character_id, memory_block
+                ))
 
         # 8) 记录 AI 回复到上下文
         self.context_mgr.add_assistant_message(
             user_id, character_id, clean_reply, memory_block,
         )
 
-        # 9) 增加对话计数
-        self.profile_mgr.increment_conversation_count(user_id, character_id)
+        # 9) 增加对话计数 + 日志（异步，不阻塞）
+        asyncio.ensure_future(self._async_log_conversation(
+            user_id, character_id, user_message, clean_reply, memory_block
+        ))
 
-        # 10) 记录对话日志
-        self.profile_mgr.log_conversation(
-            user_id=user_id,
-            character_id=character_id,
-            user_message=user_message,
-            bot_response=clean_reply,
-            memory_json=memory_block.model_dump_json(exclude_none=True) if memory_block else None,
-        )
-
-        # 11) 检查是否需要生成中期摘要
+        # 10) 检查是否需要生成中期摘要
         if self.context_mgr.should_summarize(
             user_id, character_id,
             interval=self.cfg.memory.get("summary_interval", 10),
@@ -313,3 +306,30 @@ class DialogueEngine:
 
         except Exception as e:
             logger.error("生成摘要失败: %s", e)
+
+    # ---- 异步辅助（不阻塞主回复流程） ----
+
+    async def _async_merge_memory(
+        self, user_id: str, character_id: str, memory: MemoryBlock
+    ):
+        """后台异步合并记忆"""
+        try:
+            self.profile_mgr.merge_memory_block(user_id, character_id, memory)
+            logger.debug("后台记忆提取完成 user=%s", user_id)
+        except Exception as e:
+            logger.error("后台记忆提取失败: %s", e)
+
+    async def _async_log_conversation(
+        self, user_id: str, character_id: str,
+        user_msg: str, bot_msg: str, memory: Optional[MemoryBlock],
+    ):
+        """后台异步记录对话日志和计数"""
+        try:
+            self.profile_mgr.increment_conversation_count(user_id, character_id)
+            self.profile_mgr.log_conversation(
+                user_id=user_id, character_id=character_id,
+                user_message=user_msg, bot_response=bot_msg,
+                memory_json=memory.model_dump_json(exclude_none=True) if memory else None,
+            )
+        except Exception as e:
+            logger.error("后台记录日志失败: %s", e)

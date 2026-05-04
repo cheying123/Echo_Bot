@@ -153,9 +153,11 @@ class QQBotServer:
 
         # 调用引擎
         try:
+            # 群聊用 group_群号 作为记忆隔离 key，私聊用 QQ 号
+            memory_user = bind_key if msg_type == "group" else user_id
             reply, memory = await self.engine.process_message(
                 user_message=raw_message,
-                user_id=user_id,
+                user_id=memory_user,
                 character_id=character_id,
             )
             if reply:
@@ -181,6 +183,10 @@ class QQBotServer:
             await self._cmd_profile(bind_key, event)
         elif action in ("status", "状态", "mood"):
             await self._cmd_status(bind_key, event)
+        elif action in ("stats", "统计"):
+            await self._cmd_stats(bind_key, event)
+        elif action == "reload":
+            await self._cmd_reload(bind_key, event)
         elif action == "admin":
             await self._cmd_admin(bind_key, arg, event)
         elif action == "help":
@@ -274,8 +280,52 @@ class QQBotServer:
             "  /help             显示此帮助\n"
             "\n直接发送消息与当前角色对话即可。\n"
             "首次使用：/roles 查看角色 → /switch 露西亚 选择 → 开始聊天\n"
-            "管理员: /admin list / admin add / admin remove"
+            "管理员: /admin list / admin add / admin remove\n"
+            "       /reload 重新加载角色卡\n"
+            "       /stats 查看运行统计"
         ))
+
+    # ---- 统计与重载 ----
+
+    async def _cmd_stats(self, bind_key: str, event: dict):
+        """显示运行统计"""
+        user_id_num = bind_key.replace("private_", "").replace("group_", "")
+        eng = self.engine
+        char_id = self._get_user_character(bind_key)
+        char_name = "未绑定"
+        conv_count = 0
+        if char_id:
+            card = eng.char_mgr.get_character(char_id)
+            char_name = card.name if card else char_id
+            profile = eng.profile_mgr.get_or_create_profile(
+                bind_key if event.get("message_type") == "group" else user_id_num
+            )
+            cm = profile.get_or_create_char_memory(char_id)
+            conv_count = cm.conversation_count
+
+        lines = [
+            f"角色: {char_name}",
+            f"对话: {conv_count} 轮",
+            f"API: {eng.total_calls} 次 (失败 {eng.total_errors})",
+        ]
+        if eng.total_time > 0:
+            avg = eng.total_time / max(eng.total_calls, 1)
+            lines.append(f"平均响应: {avg:.1f}s")
+        await self._reply(event, "\n".join(lines))
+
+    async def _cmd_reload(self, bind_key: str, event: dict):
+        """重新加载角色卡（管理员）"""
+        user_id_num = bind_key.replace("private_", "").replace("group_", "")
+        if not self.engine.profile_mgr.is_admin(user_id_num):
+            await self._reply(event, "你没有权限执行此操作。")
+            return
+        try:
+            self.engine.char_mgr.reload()
+            chars = self.engine.char_mgr.list_characters()
+            await self._reply(event, f"角色卡已重新加载，共 {len(chars)} 个角色。")
+        except Exception as e:
+            logger.error("重载角色卡失败: %s", e)
+            await self._reply(event, f"重载失败: {e}")
 
     # ---- 管理员命令 ----
 

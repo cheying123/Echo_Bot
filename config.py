@@ -59,7 +59,7 @@ DEFAULT_CONFIG = {
         "base_url": "",
         "model": "",
         "temperature": 0.8,
-        "max_tokens": 1024,
+        "max_tokens": 512,
         "timeout": 60,
         # 代理设置
         "proxy": {
