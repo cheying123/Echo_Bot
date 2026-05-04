@@ -559,9 +559,13 @@ class QQBotServer:
             logger.warning("WebSocket 未连接，无法发送回复")
             return
 
-        # 将 [face:ID] 转为 QQ 表情 CQ 码
         import re
+        # 将 [face:ID] 转为 QQ 表情 CQ 码
         text = re.sub(r'\[face:(\d+)\]', r'[CQ:face,id=\1]', text)
+        # 将连续换行转为 [pause] 分段发送（避免消息内出现空行）
+        text = re.sub(r'\n\s*\n', '[pause]', text)
+        # 去除单行换行（只保留分段意义）
+        text = text.replace('\n', '')
 
         msg_type = event.get("message_type", "private")
         user_id = event.get("user_id")
