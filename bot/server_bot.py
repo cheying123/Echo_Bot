@@ -56,6 +56,12 @@ class QQBotServer:
 
         # 当前 WebSocket 连接
         self._ws: Optional[websockets.WebSocketServerProtocol] = None
+        # 主动对话用的 event 缓存（最近一条消息的事件结构）
+        self._last_events: dict[str, dict] = {}
+
+        # 主动对话配置
+        self._proactive_interval = 60 * 60 * 2  # 默认 2 小时无消息则主动说话
+        self._proactive_check = 60 * 10  # 每 10 分钟检查一次
 
     # ---- 生命周期 ----
 
@@ -73,7 +79,9 @@ class QQBotServer:
             ping_timeout=10,
             max_size=2 ** 20,  # 1MB 消息上限
         ):
-            await asyncio.Future()  # 永久运行
+            # 同时启动主动对话后台任务
+            asyncio.ensure_future(self._proactive_loop())
+            await asyncio.Future()
 
     async def stop(self):
         """停止服务器"""
@@ -142,6 +150,9 @@ class QQBotServer:
             if not self._is_at_bot(event):
                 return
             raw_message = self._strip_at(raw_message)
+
+        # 保存事件用于主动对话
+        await self._store_event(bind_key, event)
 
         character_id = self._get_user_character(bind_key)
         if not character_id:
@@ -426,47 +437,72 @@ class QQBotServer:
 
     @staticmethod
     def _split_message(text: str) -> list[str]:
-        """将一段话拆成多个片段，模拟角色停顿"""
-        import re
-
-        # 短文本不拆
-        if len(text) < 25:
+        """按 AI 标记的 [pause] 拆分消息，无标记则一条发送"""
+        if "[pause]" not in text:
             return [text]
 
-        # 找拆分的候选位置：动作描写 *...* 或长停顿 …… ——
-        candidates = []
+        parts = [p.strip() for p in text.split("[pause]") if p.strip()]
+        return parts if parts else [text]
 
-        # 在动作描写 *...* 前后拆分
-        for m in re.finditer(r'\*[^*]+\*', text):
-            # 动作描写前面的内容够长才拆
-            before = text[:m.start()].strip()
-            after = text[m.end():].strip()
-            if len(before) >= 8 and len(after) >= 8:
-                # 在动作描写后拆（动作归前段还是后段？根据位置定）
-                # 如果动作在前半段，动作归后段；在后半段，动作归前段
-                if m.start() < len(text) / 2:
-                    candidates.append(m.end())
-                else:
-                    candidates.append(m.start())
+    # ---- 主动对话 ----
 
-        # 在句末停顿处拆分
-        for m in re.finditer(r'[。？！……]', text):
-            pos = m.end()
-            rest = text[pos:].strip()
-            if 8 <= len(text[:pos]) <= len(text) - 8 and len(rest) >= 6:
-                candidates.append(pos)
+    async def _store_event(self, bind_key: str, event: dict):
+        """保存最新事件，用于主动对话时发消息"""
+        self._last_events[bind_key] = event
 
-        if not candidates:
-            return [text]
+    async def _proactive_loop(self):
+        """后台定期检查：长时间没说话的，主动找话题"""
+        import random
+        from datetime import datetime, timedelta
 
-        # 选最中间的分界点（避免拆出过短片段）
-        mid = len(text) / 2
-        split_at = min(candidates, key=lambda x: abs(x - mid))
+        await asyncio.sleep(self._proactive_check)  # 先等一轮再开始
 
-        part1 = text[:split_at].strip()
-        part2 = text[split_at:].strip()
+        while True:
+            try:
+                now = datetime.now()
+                threshold = timedelta(seconds=self._proactive_interval)
 
-        return [part1, part2] if len(part1) >= 6 and len(part2) >= 6 else [text]
+                # 遍历所有有绑定的会话
+                for bind_key, event in list(self._last_events.items()):
+                    char_id = self._get_user_character(bind_key)
+                    if not char_id or not self._ws:
+                        continue
+
+                    card = self.engine.char_mgr.get_character(char_id)
+                    if not card:
+                        continue
+
+                    profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
+                    cmem = profile.get_or_create_char_memory(char_id)
+
+                    # 检查最后活动时间
+                    if not cmem.last_message_at:
+                        continue
+                    last_time = datetime.fromisoformat(cmem.last_message_at)
+                    idle_time = now - last_time
+
+                    if idle_time < threshold:
+                        continue
+
+                    # 找一句合适的台词主动发送
+                    lines = card.source_dialogues or []
+                    if lines:
+                        msg = random.choice(lines)
+                        event["raw_message"] = msg
+                        event["message"] = msg
+                        name = card.name
+
+                        # 直接发送
+                        await self._reply(event, f"{name}: {msg}")
+                        logger.info("主动对话 user=%s char=%s: %s", bind_key, char_id, msg[:30])
+
+                        # 更新活动时间避免重复触发
+                        cmem.last_message_at = now.isoformat()
+
+            except Exception as e:
+                logger.error("主动对话检查异常: %s", e)
+
+            await asyncio.sleep(self._proactive_check)
 
     # ---- 辅助 ----
 

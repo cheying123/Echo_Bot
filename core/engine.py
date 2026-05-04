@@ -146,6 +146,10 @@ class DialogueEngine:
             user_id, character_id, len(raw_response), elapsed,
         )
 
+        # 更新最后活动时间
+        char_memory.last_message_at = datetime.now().isoformat()
+        self.total_time += elapsed
+
         # 6) 解析 MEMORY 块
         memory_block, clean_reply = extract_and_parse(raw_response)
 

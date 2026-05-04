@@ -204,6 +204,8 @@ class PerCharacterMemory(BaseModel):
     recent_topics: List[str] = Field(default_factory=list)
     # 对话策略建议历史
     last_tonal_suggestion: str = ""
+    # 最后活动时间（用于主动对话检测）
+    last_message_at: str = ""
 
 
 class UserProfile(BaseModel):
