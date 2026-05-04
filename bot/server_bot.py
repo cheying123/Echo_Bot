@@ -130,10 +130,8 @@ class QQBotServer:
         if not raw_message or not bind_key:
             return
 
-        # ---- 系统命令 ----
+        # ---- 系统命令（群聊中斜杠命令不需要 @） ----
         if raw_message.startswith("/"):
-            if msg_type == "group" and not self._is_at_bot(event):
-                return
             if msg_type == "group":
                 raw_message = self._strip_at(raw_message)
             await self._handle_command(raw_message, bind_key, event)
@@ -147,8 +145,10 @@ class QQBotServer:
 
         character_id = self._get_user_character(bind_key)
         if not character_id:
-            if msg_type == "private":
-                await self._reply(event, "你还没有绑定角色，请发送 /roles 查看可用角色，/switch <角色名> 选择。")
+            hint = "你还没有绑定角色，请发送 /roles 查看可用角色，/switch <角色名> 选择。"
+            if msg_type == "group":
+                hint = "@我 " + hint
+            await self._reply(event, hint)
             return
 
         # 调用引擎
@@ -181,6 +181,8 @@ class QQBotServer:
             await self._cmd_profile(bind_key, event)
         elif action in ("status", "状态", "mood"):
             await self._cmd_status(bind_key, event)
+        elif action == "admin":
+            await self._cmd_admin(bind_key, arg, event)
         elif action == "help":
             await self._cmd_help(event)
         else:
@@ -271,10 +273,50 @@ class QQBotServer:
             "  /profile          查看你的详细画像\n"
             "  /help             显示此帮助\n"
             "\n直接发送消息与当前角色对话即可。\n"
-            "首次使用：/roles 查看角色 → /switch 露西亚 选择 → 开始聊天"
+            "首次使用：/roles 查看角色 → /switch 露西亚 选择 → 开始聊天\n"
+            "管理员: /admin list / admin add / admin remove"
         ))
 
-    # ---- go-cqhttp API 调用 ----
+    # ---- 管理员命令 ----
+
+    async def _cmd_admin(self, bind_key: str, arg: str, event: dict):
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+        if not self.engine.profile_mgr.is_admin(user_id):
+            await self._reply(event, "你没有权限执行此操作。")
+            return
+
+        sub_parts = arg.split(maxsplit=1) if arg else []
+        sub_action = sub_parts[0] if sub_parts else ""
+        sub_arg = sub_parts[1] if len(sub_parts) > 1 else ""
+
+        if sub_action == "list":
+            admins = self.engine.profile_mgr.list_admins()
+            lines = ["管理员列表:"] + [f"  - {a}" for a in admins]
+            await self._reply(event, "\n".join(lines))
+
+        elif sub_action == "add" and sub_arg:
+            target = sub_arg.strip()
+            if self.engine.profile_mgr.add_admin(target, user_id):
+                await self._reply(event, f"已将 {target} 添加为管理员。")
+            else:
+                await self._reply(event, "添加失败，可能已是管理员。")
+
+        elif sub_action == "remove" and sub_arg:
+            target = sub_arg.strip()
+            if self.engine.profile_mgr.remove_admin(target):
+                await self._reply(event, f"已移除管理员 {target}。")
+            else:
+                await self._reply(event, "移除失败或该用户不是管理员。")
+
+        else:
+            await self._reply(event, (
+                "管理员命令:\n"
+                "  /admin list            查看管理员列表\n"
+                "  /admin add <QQ号>      添加管理员\n"
+                "  /admin remove <QQ号>   移除管理员"
+            ))
+
+    # ---- WebSocket 回复 ----
 
     async def _reply(self, event: dict, text: str):
         """通过 WebSocket 发送回复"""

@@ -214,6 +214,18 @@ class ProfileManager:
                     updated_at TEXT NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS admins (
+                    user_id TEXT PRIMARY KEY,
+                    added_by TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            # 插入默认管理员
+            conn.execute(
+                "INSERT OR IGNORE INTO admins (user_id, added_by, created_at) VALUES (?, ?, ?)",
+                ("2994554807", "system", datetime.now().isoformat()),
+            )
             conn.commit()
             conn.close()
 
@@ -238,6 +250,58 @@ class ProfileManager:
                 conn.commit()
             finally:
                 conn.close()
+
+    # ---- 管理员系统 ----
+
+    def is_admin(self, user_id: str) -> bool:
+        """检查用户是否是管理员"""
+        row = self._fetch_one(
+            "SELECT 1 FROM admins WHERE user_id = ?",
+            (user_id,),
+        )
+        return row is not None
+
+    def add_admin(self, user_id: str, added_by: str) -> bool:
+        """添加管理员，返回是否成功"""
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO admins (user_id, added_by, created_at) VALUES (?, ?, ?)",
+                        (user_id, added_by, datetime.now().isoformat()),
+                    )
+                    conn.commit()
+                    return conn.total_changes > 0
+                finally:
+                    conn.close()
+        except Exception:
+            return False
+
+    def remove_admin(self, user_id: str) -> bool:
+        """移除管理员"""
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                try:
+                    conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+                    conn.commit()
+                    return conn.total_changes > 0
+                finally:
+                    conn.close()
+        except Exception:
+            return False
+
+    def list_admins(self) -> list[str]:
+        """列出所有管理员"""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute("SELECT user_id FROM admins ORDER BY created_at").fetchall()
+            return [r[0] for r in rows]
+        finally:
+            conn.close()
+
+    # ---- 数据库 ----
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))
