@@ -40,6 +40,7 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 {char_conflict}
 {char_soft_spots}
 {char_greeting}
+{char_lore}
 
 【参考对话风格】
 {char_examples}
@@ -177,6 +178,12 @@ class PromptBuilder:
         if character.greeting_style:
             greeting_text = f"\n【初识态度】{character.greeting_style}"
 
+        # 关键设定（lore），用于防止 OOC
+        lore_text = ""
+        if character.lore:
+            lines = [f"  · {item}" for item in character.lore]
+            lore_text = "\n【关键设定（必须遵守的事实）】\n" + "\n".join(lines)
+
         # 对话示例
         examples_text = self._format_examples(character.speech_examples)
 
@@ -234,6 +241,7 @@ class PromptBuilder:
             char_conflict=conflict_text,
             char_soft_spots=soft_text,
             char_greeting=greeting_text,
+            char_lore=lore_text,
             char_examples=examples_text,
             char_relevant_lines=lines_text,
             char_forbidden=forbidden_text,
