@@ -201,7 +201,7 @@ class QQBotServer:
             await self._reply(event, f"未找到角色「{arg}」。可用角色: {names}")
             return
         self._set_user_character(bind_key, matched["id"])
-        await self._reply(event, f"已切换至角色「{matched['name']}」，开始对话吧。")
+        await self._send_switch_greeting(event, matched["id"])
 
     async def _cmd_list_roles(self, event: dict):
         chars = self.engine.char_mgr.list_characters()
@@ -324,6 +324,29 @@ class QQBotServer:
     def _set_user_character(self, bind_key: str, character_id: str):
         """持久化绑定"""
         self.engine.profile_mgr.set_binding(bind_key, character_id)
+
+    async def _send_switch_greeting(self, event: dict, character_id: str):
+        """切换角色后，用角色自己的话打招呼"""
+        import random
+        card = self.engine.char_mgr.get_character(character_id)
+        if not card:
+            return
+
+        name = card.name
+        lines = card.source_dialogues or []
+
+        if lines:
+            # 从台词库挑一句像打招呼的话
+            greetings = [l for l in lines if any(kw in l for kw in ["你好", "你好", "早上", "请多", "来了", "初次", "新来的", name[:2], "熊熊", "队长"])]
+            if not greetings:
+                greetings = lines[:3]
+            reply = f"{name}: {random.choice(greetings)}"
+        elif card.greeting_style:
+            reply = f"{name}: {card.greeting_style[:80]}"
+        else:
+            reply = f"已切换至{name}，开始对话吧。"
+
+        await self._reply(event, reply)
 
     @staticmethod
     def _is_at_bot(event: dict) -> bool:
