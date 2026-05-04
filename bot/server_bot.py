@@ -124,9 +124,10 @@ class QQBotServer:
         """处理单条消息"""
         msg_type = event.get("message_type", "")  # private | group
         user_id = str(event.get("user_id", ""))
+        bind_key = self._get_bind_key(event)  # private_xxx or group_xxx
         raw_message = (event.get("raw_message", "") or event.get("message", "")).strip()
 
-        if not raw_message or not user_id:
+        if not raw_message or not bind_key:
             return
 
         # ---- 系统命令 ----
@@ -135,7 +136,7 @@ class QQBotServer:
                 return
             if msg_type == "group":
                 raw_message = self._strip_at(raw_message)
-            await self._handle_command(raw_message, user_id, event)
+            await self._handle_command(raw_message, bind_key, event)
             return
 
         # ---- 群聊 @ -> AI 回复 ----
@@ -144,7 +145,7 @@ class QQBotServer:
                 return
             raw_message = self._strip_at(raw_message)
 
-        character_id = self._get_user_character(user_id)
+        character_id = self._get_user_character(bind_key)
         if not character_id:
             if msg_type == "private":
                 await self._reply(event, "你还没有绑定角色，请发送 /roles 查看可用角色，/switch <角色名> 选择。")
@@ -165,7 +166,7 @@ class QQBotServer:
 
     # ---- 命令处理 ----
 
-    async def _handle_command(self, cmd: str, user_id: str, event: dict):
+    async def _handle_command(self, cmd: str, bind_key: str, event: dict):
         """处理斜杠命令"""
         cmd = cmd[1:].strip().lower()
         parts = cmd.split(maxsplit=1)
@@ -173,23 +174,22 @@ class QQBotServer:
         arg = parts[1] if len(parts) > 1 else ""
 
         if action in ("switch", "char", "选择"):
-            await self._cmd_switch(user_id, arg, event)
+            await self._cmd_switch(bind_key, arg, event)
         elif action in ("roles", "角色"):
             await self._cmd_list_roles(event)
         elif action in ("profile", "档案"):
-            await self._cmd_profile(user_id, event)
+            await self._cmd_profile(bind_key, event)
         elif action in ("status", "状态", "mood"):
-            await self._cmd_status(user_id, event)
+            await self._cmd_status(bind_key, event)
         elif action == "help":
             await self._cmd_help(event)
         else:
             await self._reply(event, f"未知命令: /{action}。发送 /help 查看帮助。")
 
-    async def _cmd_switch(self, user_id: str, arg: str, event: dict):
+    async def _cmd_switch(self, bind_key: str, arg: str, event: dict):
         if not arg:
             await self._reply(event, "用法: /switch <角色名>")
             return
-        # 按名称查找角色
         chars = self.engine.char_mgr.list_characters()
         matched = None
         for c in chars:
@@ -200,7 +200,7 @@ class QQBotServer:
             names = "、".join(c["name"] for c in chars)
             await self._reply(event, f"未找到角色「{arg}」。可用角色: {names}")
             return
-        self._set_user_character(user_id, matched["id"])
+        self._set_user_character(bind_key, matched["id"])
         await self._reply(event, f"已切换至角色「{matched['name']}」，开始对话吧。")
 
     async def _cmd_list_roles(self, event: dict):
@@ -214,9 +214,9 @@ class QQBotServer:
             lines.append(f"  · {c['name']} — {traits}")
         await self._reply(event, "\n".join(lines))
 
-    async def _cmd_profile(self, user_id: str, event: dict):
-        profile = self.engine.profile_mgr.get_or_create_profile(user_id)
-        char_id = self._get_user_character(user_id)
+    async def _cmd_profile(self, bind_key: str, event: dict):
+        profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
+        char_id = self._get_user_character(bind_key)
         if not char_id:
             await self._reply(event, "请先绑定角色。")
             return
@@ -233,10 +233,10 @@ class QQBotServer:
             lines.append(f"兴趣: {'、'.join(cm.observed_interests[-5:])}")
         await self._reply(event, "\n".join(lines))
 
-    async def _cmd_status(self, user_id: str, event: dict):
+    async def _cmd_status(self, bind_key: str, event: dict):
         """显示当前角色的情绪、关系和语气"""
-        profile = self.engine.profile_mgr.get_or_create_profile(user_id)
-        char_id = self._get_user_character(user_id)
+        profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
+        char_id = self._get_user_character(bind_key)
         if not char_id:
             await self._reply(event, "请先绑定角色。")
             return
@@ -308,13 +308,22 @@ class QQBotServer:
 
     # ---- 辅助 ----
 
-    def _get_user_character(self, user_id: str) -> Optional[str]:
-        """获取用户绑定的角色（从数据库）"""
-        return self.engine.profile_mgr.get_binding(user_id)
+    @staticmethod
+    def _get_bind_key(event: dict) -> str:
+        """生成绑定键：私聊用 private_QQ号，群聊用 group_群号"""
+        msg_type = event.get("message_type", "private")
+        if msg_type == "group":
+            group_id = event.get("group_id", "")
+            return f"group_{group_id}" if group_id else ""
+        return f"private_{event.get('user_id', '')}"
 
-    def _set_user_character(self, user_id: str, character_id: str):
-        """持久化绑定用户到角色"""
-        self.engine.profile_mgr.set_binding(user_id, character_id)
+    def _get_user_character(self, bind_key: str) -> Optional[str]:
+        """获取绑定键对应的角色"""
+        return self.engine.profile_mgr.get_binding(bind_key)
+
+    def _set_user_character(self, bind_key: str, character_id: str):
+        """持久化绑定"""
+        self.engine.profile_mgr.set_binding(bind_key, character_id)
 
     @staticmethod
     def _is_at_bot(event: dict) -> bool:
