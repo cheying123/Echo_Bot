@@ -176,8 +176,10 @@ class QQBotServer:
             await self._cmd_switch(user_id, arg, event)
         elif action in ("roles", "角色"):
             await self._cmd_list_roles(event)
-        elif action == "profile":
+        elif action in ("profile", "档案"):
             await self._cmd_profile(user_id, event)
+        elif action in ("status", "状态", "mood"):
+            await self._cmd_status(user_id, event)
         elif action == "help":
             await self._cmd_help(event)
         else:
@@ -231,11 +233,41 @@ class QQBotServer:
             lines.append(f"兴趣: {'、'.join(cm.observed_interests[-5:])}")
         await self._reply(event, "\n".join(lines))
 
+    async def _cmd_status(self, user_id: str, event: dict):
+        """显示当前角色的情绪、关系和语气"""
+        profile = self.engine.profile_mgr.get_or_create_profile(user_id)
+        char_id = self._get_user_character(user_id)
+        if not char_id:
+            await self._reply(event, "请先绑定角色。")
+            return
+
+        card = self.engine.char_mgr.get_character(char_id)
+        name = card.name if card else char_id
+        cm = profile.get_or_create_char_memory(char_id)
+
+        # 最近情绪
+        recent_mood = "未知"
+        if cm.emotional_history:
+            recent = cm.emotional_history[-1]
+            recent_mood = recent.get("mood", "neutral")
+
+        # 语气建议
+        tone = cm.last_tonal_suggestion or "默认"
+
+        lines = [
+            f"【{name}】",
+            f"情绪: {recent_mood}",
+            f"关系: {cm.relationship_stage}",
+            f"语气: {tone}",
+        ]
+        await self._reply(event, "\n".join(lines))
+
     async def _cmd_help(self, event: dict):
         await self._reply(event, (
             "可用命令:\n"
             "  /switch <角色名>  切换角色\n"
             "  /roles            查看可用角色\n"
+            "  /status           当前情绪/关系/语气\n"
             "  /profile          查看用户画像\n"
             "  /help             显示此帮助\n"
             "\n直接发送消息与当前角色对话。"
