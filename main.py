@@ -103,15 +103,12 @@ async def run_server_mode(config_path: str | None = None):
         engine=engine,
         host=svr_cfg.get("host", "0.0.0.0"),
         ws_port=svr_cfg.get("ws_port", 8765),
-        http_api_url=svr_cfg.get("http_api_url", "http://127.0.0.1:5700"),
-        http_api_token=svr_cfg.get("http_api_token", ""),
     )
 
     logger.info("启动 QQ 机器人服务模式")
     print(f"\n  WS 服务器: ws://{svr_cfg.get('host', '0.0.0.0')}:{svr_cfg.get('ws_port', 8765)}")
-    print(f"  go-cqhttp HTTP API: {svr_cfg.get('http_api_url', 'http://127.0.0.1:5700')}")
     print(f"  加载角色: {len(char_mgr.list_characters())} 个\n")
-    print("等待 go-cqhttp 连接...\n")
+    print("等待 LLOneBot 连接...\n")
 
     await server.start()
 

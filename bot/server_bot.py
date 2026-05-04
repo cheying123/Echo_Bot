@@ -22,7 +22,6 @@ import json
 import logging
 from typing import Optional
 
-import httpx
 import websockets
 from websockets.server import WebSocketServer
 
@@ -51,22 +50,11 @@ class QQBotServer:
         self.engine = engine
         self.host = host
         self.ws_port = ws_port
-        self.http_api_url = http_api_url.rstrip("/")
-        self.http_api_token = http_api_token
 
         # 用户 → 角色绑定管理
-        # 可在运行时通过私聊命令切换
         self._user_char_map: dict[str, str] = {}
-
-        # go-cqhttp HTTP API 客户端
-        headers = {}
-        if http_api_token:
-            headers["Authorization"] = f"Bearer {http_api_token}"
-        self._api_client = httpx.AsyncClient(
-            base_url=self.http_api_url,
-            headers=headers,
-            timeout=httpx.Timeout(10.0),
-        )
+        # 消息 ID 自增（用于 echo）
+        self._msg_id = 0
 
         # 当前 WebSocket 连接
         self._ws: Optional[websockets.WebSocketServerProtocol] = None
@@ -76,8 +64,8 @@ class QQBotServer:
     async def start(self):
         """启动 WebSocket 服务器（永久运行）"""
         logger.info(
-            "启动 QQ Bot 服务器: ws://%s:%s  (go-cqhttp HTTP API: %s)",
-            self.host, self.ws_port, self.http_api_url,
+            "启动 QQ Bot 服务器: ws://%s:%s",
+            self.host, self.ws_port,
         )
         async with websockets.serve(
             self._handle_connection,
@@ -93,7 +81,6 @@ class QQBotServer:
         """停止服务器"""
         if self._ws:
             await self._ws.close()
-        await self._api_client.aclose()
 
     # ---- WebSocket 事件处理 ----
 
@@ -257,27 +244,34 @@ class QQBotServer:
     # ---- go-cqhttp API 调用 ----
 
     async def _reply(self, event: dict, text: str):
-        """通过 go-cqhttp HTTP API 发送回复"""
+        """通过 WebSocket 发送回复"""
+        if not self._ws:
+            logger.warning("WebSocket 未连接，无法发送回复")
+            return
+
         msg_type = event.get("message_type", "private")
+        user_id = event.get("user_id")
+        self._msg_id += 1
+
+        # 构造 OneBot v11 发送消息动作
+        action = {
+            "action": "send_msg",
+            "params": {
+                "message_type": msg_type,
+                "message": text,
+            },
+            "echo": f"reply_{self._msg_id}",
+        }
 
         if msg_type == "group":
-            group_id = event.get("group_id")
-            if not group_id:
-                return
-            payload = {"group_id": group_id, "message": text}
-            path = "/send_group_msg"
+            action["params"]["group_id"] = event.get("group_id")
         else:
-            payload = {"user_id": event.get("user_id"), "message": text}
-            path = "/send_private_msg"
+            action["params"]["user_id"] = user_id
 
         try:
-            resp = await self._api_client.post(path, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("status") == "failed":
-                logger.warning("go-cqhttp 返回错误: %s", data.get("msg", ""))
+            await self._ws.send(json.dumps(action))
         except Exception as e:
-            logger.error("发送消息失败: %s", e)
+            logger.error("WebSocket 发送消息失败: %s", e)
 
     # ---- 辅助 ----
 

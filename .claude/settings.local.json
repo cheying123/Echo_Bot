@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scp -o StrictHostKeyChecking=no -i /tmp/echo_bot_key root@47.82.121.4:/opt/go-cqhttp/qrcode.png /tmp/echo_bot_qrcode.png)",
+      "Read(//c/Users/cheying/AppData/Local/Temp/**)",
+      "Bash(scp -o StrictHostKeyChecking=no -i /tmp/echo_bot_key root@47.82.121.4:/opt/go-cqhttp/qrcode.png /d/aibot/qrcode.png)",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"pkill -9 -f go-cqhttp; pkill -9 -f expect; echo cleaned\")",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"pkill -9 -f go-cqhttp 2>/dev/null; pkill -9 -f expect 2>/dev/null; echo done\")",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"bash -c 'rm -rf /opt/go-cqhttp; mkdir -p /opt/lagrange; echo done'\")",
+      "Bash(bash -c 'curl -L --connect-timeout 10 -o /d/aibot/lagrange.tar.gz \"https://github.com/LagrangeDev/Lagrange.OneBot/releases/download/v0.7.3/Lagrange.OneBot-linux-x64_net8.0.tar.gz\" 2>&1 | tail -3')",
+      "Bash(bash -c 'curl -L --connect-timeout 10 -o /d/aibot/lagrange.zip \"https://github.com/KonataDev/Lagrange.OneBot/releases/latest/download/Lagrange.OneBot-linux-x64.zip\" 2>&1 | tail -3')",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"bash -c 'cd /opt/lagrange && curl -L --connect-timeout 10 -o lagrange.zip \\\\\"https://github.com/KonataDev/Lagrange.OneBot/releases/latest/download/Lagrange.OneBot-linux-x64.zip\\\\\" 2>&1 | tail -3 && wc -c lagrange.zip'\")",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"bash -c 'cd /opt/lagrange && curl -L --connect-timeout 10 -o lagrange.zip \\\\\"https://ghfast.top/https://github.com/KonataDev/Lagrange.OneBot/releases/latest/download/Lagrange.OneBot-linux-x64.zip\\\\\" 2>&1 | tail -2 && ls -la lagrange.zip'\")",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"bash -c 'cd /opt/lagrange && curl -L --connect-timeout 15 -o lagrange.zip \\\\\"https://ghproxy.net/https://github.com/KonataDev/Lagrange.OneBot/releases/latest/download/Lagrange.OneBot-linux-x64.zip\\\\\" 2>&1 | tail -3 && ls -la lagrange.zip'\")",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"bash -c 'curl -s --connect-timeout 10 \\\\\"https://api.github.com/repos/KonataDev/Lagrange.OneBot/releases/latest\\\\\" 2>&1 | head -5'\")",
+      "Bash(ssh -i /tmp/echo_bot_key -o StrictHostKeyChecking=no root@47.82.121.4 \"bash -c 'curl -s --connect-timeout 10 \\\\\"https://api.github.com/repos/LagrangeDev/Lagrange.Core/releases/latest\\\\\" 2>&1 | grep -E \\\\\"tag_name|browser_download_url\\\\\" | head -5'\")"
+    ]
+  }
+}
