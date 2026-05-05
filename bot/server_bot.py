@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -220,14 +221,33 @@ class QQBotServer:
         try:
             # 群聊用 group_群号 作为记忆隔离 key，私聊用 QQ 号
             memory_user = bind_key if msg_type == "group" else user_id
-            reply, memory = await self.engine.process_message(
+            reply, memory_data = await self.engine.process_message(
                 user_message=raw_message,
                 user_id=memory_user,
                 character_id=character_id,
             )
+
+            # 群聊时也按 QQ 号保存一份用户画像
+            if msg_type == "group" and memory_data:
+                user_profile = self.engine.profile_mgr.get_or_create_profile(f"user_{user_id}")
+                user_cm = user_profile.get_or_create_char_memory(character_id)
+                # 合并关键数据
+                traits = memory_data.get("observations", {}).get("new_traits", [])
+                for t in traits:
+                    if t and t not in user_cm.observed_traits:
+                        user_cm.observed_traits.append(t)
+                mood = memory_data.get("observations", {}).get("mood", "")
+                if mood and mood != "neutral":
+                    user_cm.emotional_history.append({"mood": mood, "timestamp": datetime.now().isoformat()})
+                user_cm.conversation_count += 1
+                interests = memory_data.get("observations", {}).get("interests_mentioned", [])
+                for i in interests:
+                    if i and i not in user_cm.observed_interests:
+                        user_cm.observed_interests.append(i)
+                self.engine.profile_mgr.save_profile(user_profile)
+
             if reply:
                 reply = await self._attach_sticker(reply, character_id)
-                # 插件消息钩子
                 reply = await self.plugin_mgr.dispatch_message(event, reply)
                 if reply:
                     await self._reply(event, reply)
@@ -400,7 +420,7 @@ class QQBotServer:
         elif action in ("角色", "roles"):
             await self._cmd_list_roles(event)
         elif action in ("档案", "profile"):
-            await self._cmd_profile(bind_key, event)
+            await self._cmd_profile(bind_key, arg, event)
         elif action in ("状态", "status", "mood"):
             await self._cmd_status(bind_key, event)
         elif action in ("设置城市", "setcity", "城市"):
@@ -454,43 +474,67 @@ class QQBotServer:
             lines.append(f"  · {c['name']} — {traits}")
         await self._reply(event, "\n".join(lines))
 
-    async def _cmd_profile(self, bind_key: str, event: dict):
-        """查看用户详细画像"""
-        profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
-        char_id = self._get_user_character(bind_key)
-        card = self.engine.char_mgr.get_character(char_id) if char_id else None
-        cm = profile.get_or_create_char_memory(char_id) if char_id else None
-        user_id = bind_key.replace("private_", "").replace("group_", "")
+    async def _cmd_profile(self, bind_key: str, arg: str, event: dict):
+        """查看用户统一画像（跨所有角色合并）"""
+        target_key = bind_key
+        target_user_id = bind_key.replace("private_", "").replace("group_", "")
 
-        name = f"与{card.name}" if card else "未绑定角色"
-        lines = [f"📋 {name} 的画像"]
+        if arg:
+            qq = arg.strip()
+            if qq.isdigit():
+                target_user_id = qq
+                target_key = f"private_{qq}"
+            else:
+                await self._reply(event, "用法: /档案 或 /档案 <QQ号> 查看别人的画像")
+                return
 
-        if cm:
-            # 关系阶段 & 好感度
-            lines.append(f"├─ 关系阶段：{cm.relationship_stage}")
-            lines.append(f"│  ├─ 信任度：{cm.trust_level}/10")
-            lines.append(f"│  └─ 好感度：{cm.affection_level}/10")
+        # 获取用户的所有画像数据（私聊 + 群聊 + 跨角色）
+        profile = self.engine.profile_mgr.get_or_create_profile(target_key)
+        user_profile = self.engine.profile_mgr.get_or_create_profile(f"user_{target_user_id}")
+        is_self = target_user_id == bind_key.replace("private_", "").replace("group_", "")
 
-            # 性格特点
-            if cm.observed_traits:
-                traits = '、'.join(cm.observed_traits[:8])
-                lines.append(f"├─ 性格特点：{traits}")
+        # 遍历所有角色的记忆，合并为一个统一画像
+        traits = set()
+        interests = set()
+        dislikes = set()
+        total_convs = 0
+        summary = ""
 
-            # 聊天偏好
-            if cm.observed_interests:
-                interests = '、'.join(cm.observed_interests[:6])
-                lines.append(f"├─ 感兴趣：{interests}")
-            if cm.observed_dislikes:
-                dislikes = '、'.join(cm.observed_dislikes[:4])
-                lines.append(f"├─ 反感：{dislikes}")
+        all_memories = {}
+        all_memories.update(profile.per_character_memory)
+        all_memories.update(user_profile.per_character_memory)
 
-            if cm.last_summary:
-                lines.append(f"├─ 最近对话：{cm.last_summary[:80]}")
+        for char_id, cm in all_memories.items():
+            traits.update(cm.observed_traits)
+            interests.update(cm.observed_interests)
+            dislikes.update(cm.observed_dislikes)
+            total_convs += cm.conversation_count
+        if not summary and all_memories.values():
+            sm = [m.last_summary for m in all_memories.values() if m.last_summary]
+            if sm:
+                summary = max(sm, key=len)
 
-        # 个人风格
-        user_style = self._get_user_style_summary(user_id)
+        label = "我的" if is_self else f"用户 {target_user_id} 的"
+
+        if total_convs == 0 and not traits and not interests:
+            await self._reply(event, f"暂无「{label}」画像数据，聊过天后才会生成。")
+            return
+
+        lines = [f"📋 {label}画像"]
+        lines.append(f"├─ 对话 {total_convs} 轮")
+
+        if traits:
+            lines.append(f"├─ 性格：{'、'.join(list(traits)[:8])}")
+        if interests:
+            lines.append(f"├─ 兴趣：{'、'.join(list(interests)[:6])}")
+        if dislikes:
+            lines.append(f"├─ 反感：{'、'.join(list(dislikes)[:4])}")
+        if summary:
+            lines.append(f"├─ 近况：{summary[:80]}")
+
+        user_style = self._get_user_style_summary(target_user_id)
         if user_style:
-            lines.append(f"└─ 说话风格：{user_style}")
+            lines.append(f"└─ 风格：{user_style}")
 
         await self._reply(event, "\n".join(lines))
 
@@ -760,8 +804,8 @@ class QQBotServer:
         user_id = event.get("user_id")
         self._msg_id += 1
 
-        # 带格式的文字（如 /帮助 里的列表）一条发完，不拆分不延迟
-        has_bullets = "  /" in text or "🎭" in text or "☀️" in text or "🔧" in text
+        # 带格式的文字一条发完，不拆分不延迟
+        has_bullets = "  /" in text or "🎭" in text or "☀️" in text or "🔧" in text or "├─" in text or "📋" in text
         if has_bullets:
             segs = [text]
         else:
