@@ -71,6 +71,8 @@ class QQBotServer:
         # 群聊活跃度追踪
         self._group_activity: dict[str, list[dict]] = {}  # group_key -> [messages]
         self._group_last_reply: dict[str, float] = {}  # group_key -> last reply time
+        # 群聊风格学习
+        self._group_styles: dict[str, dict] = {}  # group_key -> {freq: {}, emoticons: [], endings: []}
         # 定时任务
         self._scheduler: Optional[Scheduler] = None
 
@@ -205,6 +207,12 @@ class QQBotServer:
             await self._reply(event, "暂无可用角色。")
             return
 
+        # 群聊时注入风格上下文
+        if msg_type == "group":
+            group_style = self._get_group_style(bind_key)
+            if group_style:
+                raw_message = f"[群聊风格: {group_style}] {raw_message}"
+
         # 调用引擎
         try:
             # 群聊用 group_群号 作为记忆隔离 key，私聊用 QQ 号
@@ -227,7 +235,7 @@ class QQBotServer:
     # ---- 群聊时机判断 ----
 
     def _track_group_message(self, bind_key: str, message: str, user_id: str):
-        """记录群聊消息到活跃度追踪"""
+        """记录群聊消息到活跃度追踪，同时学习说话风格"""
         import time
         if bind_key not in self._group_activity:
             self._group_activity[bind_key] = []
@@ -236,8 +244,66 @@ class QQBotServer:
             "user": user_id,
             "time": time.time(),
         })
-        # 只保留最近 10 条
         self._group_activity[bind_key] = self._group_activity[bind_key][-10:]
+
+        # 风格学习
+        self._learn_group_style(bind_key, message)
+
+    def _learn_group_style(self, bind_key: str, message: str):
+        """从消息中学习群聊的说话风格"""
+        import re
+        if bind_key not in self._group_styles:
+            self._group_styles[bind_key] = {"freq": {}, "emoticons": [], "endings": {}}
+
+        style = self._group_styles[bind_key]
+
+        # 提取中文/英文单词
+        words = re.findall(r'[一-鿿\w]+', message.lower())
+        for w in words:
+            if len(w) >= 2:
+                style["freq"][w] = style["freq"].get(w, 0) + 1
+
+        # 提取表情符号
+        emoticons = re.findall(r'[\U0001F600-\U0001F9FF☀-➿]', message)
+        for e in emoticons:
+            if e not in style["emoticons"]:
+                style["emoticons"].append(e)
+
+        # 提取句尾特征
+        endings = re.findall(r'[。！？～~嘛啦哦呢哎哟哇]|[哈]+$', message.strip())
+        for e in endings:
+            style["endings"][e] = style["endings"].get(e, 0) + 1
+
+    def _get_group_style(self, bind_key: str) -> str:
+        """生成群聊风格描述字符串"""
+        style = self._group_styles.get(bind_key)
+        if not style or not style["freq"]:
+            return ""
+
+        parts = []
+
+        # 高频词（排除常见词）
+        common_words = {"的", "了", "是", "不", "我", "有", "就", "在", "也", "都", "说", "和", "这", "你", "他", "一个"}
+        top_words = sorted(
+            [(w, c) for w, c in style["freq"].items() if w not in common_words],
+            key=lambda x: -x[1],
+        )[:6]
+        if top_words:
+            words_str = "、".join(w for w, _ in top_words)
+            parts.append(f"常用词: {words_str}")
+
+        # 常用表情
+        if style["emoticons"]:
+            emo_str = "".join(style["emoticons"][:5])
+            parts.append(f"常见表情: {emo_str}")
+
+        # 句尾特征
+        if style["endings"]:
+            top_endings = sorted(style["endings"].items(), key=lambda x: -x[1])[:4]
+            endings_str = "".join(e for e, _ in top_endings)
+            parts.append(f"句尾习惯: {endings_str}")
+
+        return "，".join(parts) if parts else ""
 
     async def _should_chime_in(self, bind_key: str, event: dict) -> bool:
         """判断是否要在群里主动插话"""
