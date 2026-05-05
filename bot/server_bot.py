@@ -77,6 +77,8 @@ class QQBotServer:
         self._group_styles: dict[str, dict] = {}  # group_key -> {freq: {}, emoticons: [], endings: []}
         # 个人风格学习（按用户）
         self._user_styles: dict[str, dict] = {}  # user_id -> {freq: {}, emoticons: [], endings: []}
+        # 群聊对话连续性追踪（最近 @过的会话，2分钟内免 @继续对话）
+        self._group_engaged: dict[str, float] = {}  # group_key -> last @ time
         # 定时任务
         self._scheduler: Optional[Scheduler] = None
 
@@ -175,18 +177,19 @@ class QQBotServer:
 
         # ---- 群聊处理 ----
         if msg_type == "group":
-            # 记录群聊消息到活跃度追踪
+            import time as _time
             self._track_group_message(bind_key, raw_message, user_id)
 
             if self._is_at_bot(event):
                 raw_message = self._strip_at(raw_message)
+                self._group_engaged[bind_key] = _time.time()  # 标记对话中
             else:
-                # 没 @ 时，判断是否要主动插话
-                if not await self._should_chime_in(bind_key, event):
+                # 最近 @ 过（2分钟内）→ 继续对话，免 @
+                engaged = self._group_engaged.get(bind_key, 0)
+                if _time.time() - engaged < 120:
+                    pass  # 保持 raw_message 不变，继续回复
+                elif not await self._should_chime_in(bind_key, event):
                     return
-                # 构造一个上下文感知的请求
-                context = self._get_group_context(bind_key)
-                raw_message = f"（群聊中）{context}" if context else raw_message
 
         # 保存事件用于主动对话
         await self._store_event(bind_key, event)
@@ -247,6 +250,9 @@ class QQBotServer:
                 self.engine.profile_mgr.save_profile(user_profile)
 
             if reply:
+                import time as _time2
+                if msg_type == "group":
+                    self._group_engaged[bind_key] = _time2.time()
                 reply = await self._attach_sticker(reply, character_id)
                 reply = await self.plugin_mgr.dispatch_message(event, reply)
                 if reply:
