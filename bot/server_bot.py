@@ -150,6 +150,7 @@ class QQBotServer:
         user_id = str(event.get("user_id", ""))
         bind_key = self._get_bind_key(event)  # private_xxx or group_xxx
         raw_message = (event.get("raw_message", "") or event.get("message", "")).strip()
+        raw_message = self._clean_message(raw_message)
 
         if not raw_message or not bind_key:
             return
@@ -757,6 +758,20 @@ class QQBotServer:
             reply = f"已切换至{name}，开始对话吧。"
 
         await self._reply(event, reply)
+
+    @staticmethod
+    def _clean_message(text: str) -> str:
+        """将 CQ 码转为文字描述，让 AI 理解表情包和图片"""
+        import re
+        # 表情包/大表情 [CQ:mface,id=xxx,text=名称]
+        text = re.sub(r'\[CQ:mface[^\]]*text=([^,\]]+)[^\]]*\]', r'[发送了\1表情包]', text)
+        # 图片 [CQ:image,...]
+        text = re.sub(r'\[CQ:image[^\]]*\]', '[发送了一张图片]', text)
+        # QQ 小表情 [CQ:face,id=xxx]
+        text = re.sub(r'\[CQ:face,id=\d+\]', '[表情]', text)
+        # 其他 CQ 码
+        text = re.sub(r'\[CQ:[^\]]*\]', '', text)
+        return text.strip()
 
     @staticmethod
     def _is_at_bot(event: dict) -> bool:
