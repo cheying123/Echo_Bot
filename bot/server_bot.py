@@ -68,6 +68,9 @@ class QQBotServer:
         # 主动对话配置
         self._proactive_interval = 60 * 60 * 2  # 默认 2 小时无消息则主动说话
         self._proactive_check = 60 * 10  # 每 10 分钟检查一次
+        # 群聊活跃度追踪
+        self._group_activity: dict[str, list[dict]] = {}  # group_key -> [messages]
+        self._group_last_reply: dict[str, float] = {}  # group_key -> last reply time
         # 定时任务
         self._scheduler: Optional[Scheduler] = None
 
@@ -164,11 +167,20 @@ class QQBotServer:
             await self._handle_command(raw_message, bind_key, event)
             return
 
-        # ---- 群聊 @ -> AI 回复 ----
+        # ---- 群聊处理 ----
         if msg_type == "group":
-            if not self._is_at_bot(event):
-                return
-            raw_message = self._strip_at(raw_message)
+            # 记录群聊消息到活跃度追踪
+            self._track_group_message(bind_key, raw_message, user_id)
+
+            if self._is_at_bot(event):
+                raw_message = self._strip_at(raw_message)
+            else:
+                # 没 @ 时，判断是否要主动插话
+                if not await self._should_chime_in(bind_key, event):
+                    return
+                # 构造一个上下文感知的请求
+                context = self._get_group_context(bind_key)
+                raw_message = f"（群聊中）{context}" if context else raw_message
 
         # 保存事件用于主动对话
         await self._store_event(bind_key, event)
@@ -211,6 +223,60 @@ class QQBotServer:
         except Exception as e:
             logger.error("处理消息异常 user=%s: %s", user_id, e)
             await self._reply(event, "（暂时无法回应……）")
+
+    # ---- 群聊时机判断 ----
+
+    def _track_group_message(self, bind_key: str, message: str, user_id: str):
+        """记录群聊消息到活跃度追踪"""
+        import time
+        if bind_key not in self._group_activity:
+            self._group_activity[bind_key] = []
+        self._group_activity[bind_key].append({
+            "text": message[:100],
+            "user": user_id,
+            "time": time.time(),
+        })
+        # 只保留最近 10 条
+        self._group_activity[bind_key] = self._group_activity[bind_key][-10:]
+
+    async def _should_chime_in(self, bind_key: str, event: dict) -> bool:
+        """判断是否要在群里主动插话"""
+        import time, random
+        # 没绑定角色不插话
+        char_id = self._get_user_character(bind_key)
+        if not char_id:
+            return False
+
+        # 冷却检查（至少 30 秒后才能再次主动说话）
+        now = time.time()
+        last_reply = self._group_last_reply.get(bind_key, 0)
+        if now - last_reply < 30:
+            return False
+
+        # 活跃度检查：最近 3 条消息是否在 5 分钟内
+        activity = self._group_activity.get(bind_key, [])
+        recent = [m for m in activity if now - m["time"] < 300]
+        if len(recent) < 2:
+            return False
+
+        # 随机概率（25% 概率插话）
+        if random.random() > 0.25:
+            return False
+
+        # 更新冷却时间
+        self._group_last_reply[bind_key] = now
+        return True
+
+    def _get_group_context(self, bind_key: str) -> str:
+        """获取最近群聊上下文"""
+        import time
+        activity = self._group_activity.get(bind_key, [])
+        recent = [m for m in activity if time.time() - m["time"] < 300]
+        if not recent:
+            return ""
+        # 取最近 3 条消息作为上下文
+        context_lines = [m["text"][:60] for m in recent[-3:]]
+        return " | ".join(context_lines)
 
     # ---- 命令处理 ----
 
