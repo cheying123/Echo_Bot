@@ -74,6 +74,8 @@ class QQBotServer:
         self._group_last_reply: dict[str, float] = {}  # group_key -> last reply time
         # 群聊风格学习
         self._group_styles: dict[str, dict] = {}  # group_key -> {freq: {}, emoticons: [], endings: []}
+        # 个人风格学习（按用户）
+        self._user_styles: dict[str, dict] = {}  # user_id -> {freq: {}, emoticons: [], endings: []}
         # 定时任务
         self._scheduler: Optional[Scheduler] = None
 
@@ -247,8 +249,9 @@ class QQBotServer:
         })
         self._group_activity[bind_key] = self._group_activity[bind_key][-10:]
 
-        # 风格学习
+        # 风格学习（群聊 + 个人）
         self._learn_group_style(bind_key, message)
+        self._learn_user_style(user_id, message)
 
     def _learn_group_style(self, bind_key: str, message: str):
         """从消息中学习群聊的说话风格"""
@@ -274,6 +277,38 @@ class QQBotServer:
         endings = re.findall(r'[。！？～~嘛啦哦呢哎哟哇]|[哈]+$', message.strip())
         for e in endings:
             style["endings"][e] = style["endings"].get(e, 0) + 1
+
+    def _learn_user_style(self, user_id: str, message: str):
+        """从用户消息中学习个人说话风格"""
+        import re
+        if user_id not in self._user_styles:
+            self._user_styles[user_id] = {"freq": {}, "emoticons": [], "endings": {}}
+        style = self._user_styles[user_id]
+
+        words = re.findall(r'[一-鿿\w]+', message.lower())
+        for w in words:
+            if len(w) >= 2:
+                style["freq"][w] = style["freq"].get(w, 0) + 1
+        emoticons = re.findall(r'[\U0001F600-\U0001F9FF☀-➿]', message)
+        for e in emoticons:
+            if e not in style["emoticons"]:
+                style["emoticons"].append(e)
+        endings = re.findall(r'[。！？～~嘛啦哦呢哎哟哇]|[哈]+$', message.strip())
+        for e in endings:
+            style["endings"][e] = style["endings"].get(e, 0) + 1
+
+    def _get_user_style_summary(self, user_id: str) -> str:
+        """生成用户个人风格描述"""
+        style = self._user_styles.get(user_id)
+        if not style or not style["freq"]:
+            return ""
+        common = {"的", "了", "是", "不", "我", "有", "就", "在", "也", "都", "说", "和", "这", "你", "他", "一个"}
+        top = sorted([(w, c) for w, c in style["freq"].items() if w not in common], key=lambda x: -x[1])[:8]
+        if not top:
+            return ""
+        words = "、".join(w for w, _ in top)
+        emo = "".join(style["emoticons"][:5]) if style["emoticons"] else ""
+        return f"常用词: {words}" + (f" {emo}" if emo else "")
 
     def _get_group_style(self, bind_key: str) -> str:
         """生成群聊风格描述字符串"""
@@ -420,22 +455,43 @@ class QQBotServer:
         await self._reply(event, "\n".join(lines))
 
     async def _cmd_profile(self, bind_key: str, event: dict):
+        """查看用户详细画像"""
         profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
         char_id = self._get_user_character(bind_key)
-        if not char_id:
-            await self._reply(event, "请先绑定角色。")
-            return
-        cm = profile.get_or_create_char_memory(char_id)
-        lines = [
-            f"关系阶段: {cm.relationship_stage}",
-            f"信任度: {cm.trust_level}/10",
-            f"好感度: {cm.affection_level}/10",
-            f"对话次数: {cm.conversation_count}",
-        ]
-        if cm.observed_traits:
-            lines.append(f"性格标签: {'、'.join(cm.observed_traits[-5:])}")
-        if cm.observed_interests:
-            lines.append(f"兴趣: {'、'.join(cm.observed_interests[-5:])}")
+        card = self.engine.char_mgr.get_character(char_id) if char_id else None
+        cm = profile.get_or_create_char_memory(char_id) if char_id else None
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+
+        name = f"与{card.name}" if card else "未绑定角色"
+        lines = [f"📋 {name} 的画像"]
+
+        if cm:
+            # 关系阶段 & 好感度
+            lines.append(f"├─ 关系阶段：{cm.relationship_stage}")
+            lines.append(f"│  ├─ 信任度：{cm.trust_level}/10")
+            lines.append(f"│  └─ 好感度：{cm.affection_level}/10")
+
+            # 性格特点
+            if cm.observed_traits:
+                traits = '、'.join(cm.observed_traits[:8])
+                lines.append(f"├─ 性格特点：{traits}")
+
+            # 聊天偏好
+            if cm.observed_interests:
+                interests = '、'.join(cm.observed_interests[:6])
+                lines.append(f"├─ 感兴趣：{interests}")
+            if cm.observed_dislikes:
+                dislikes = '、'.join(cm.observed_dislikes[:4])
+                lines.append(f"├─ 反感：{dislikes}")
+
+            if cm.last_summary:
+                lines.append(f"├─ 最近对话：{cm.last_summary[:80]}")
+
+        # 个人风格
+        user_style = self._get_user_style_summary(user_id)
+        if user_style:
+            lines.append(f"└─ 说话风格：{user_style}")
+
         await self._reply(event, "\n".join(lines))
 
     async def _cmd_status(self, bind_key: str, event: dict):
@@ -699,20 +755,20 @@ class QQBotServer:
         import random
         # 将 [face:ID] 转为 QQ 表情 CQ 码
         text = re.sub(r'\[face:(\d+)\]', r'[CQ:face,id=\1]', text)
-        # 去除换行
-        text = text.replace('\n', '')
 
         msg_type = event.get("message_type", "private")
         user_id = event.get("user_id")
         self._msg_id += 1
 
-        # 模拟真人打字延迟（短消息0.3-0.8s，长消息0.8-2s）
-        delay = min(0.3 + len(text) * 0.008, 2.0)
-        delay = delay * random.uniform(0.8, 1.2)
-        await asyncio.sleep(delay)
-
-        # 按自然句子拆分
-        segs = self._split_message(text)
+        # 带格式的文字（如 /帮助 里的列表）一条发完，不拆分不延迟
+        has_bullets = "  /" in text or "🎭" in text or "☀️" in text or "🔧" in text
+        if has_bullets:
+            segs = [text]
+        else:
+            text = text.replace('\n', '')
+            delay = min(0.3 + len(text) * 0.008, 2.0) * random.uniform(0.8, 1.2)
+            await asyncio.sleep(delay)
+            segs = self._split_message(text)
 
         for i, seg in enumerate(segs):
             final_text = seg
@@ -1015,13 +1071,9 @@ class QQBotServer:
             return ""
 
     @staticmethod
-        """
-        从事件中提取文字消息和表情描述
-        返回 (raw_text, sticker_description)
-        """
+    def _extract_message_old(event: dict) -> tuple[str, str]:
         raw = (event.get("raw_message", "") or "").strip()
         msg = event.get("message", "")
-
         sticker_text = ""
 
         # 如果 message 是列表格式，从中提取 sticker 信息
