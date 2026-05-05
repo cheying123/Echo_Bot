@@ -22,6 +22,7 @@ import json
 import logging
 from typing import Optional
 
+import httpx
 import websockets
 from websockets.server import WebSocketServer
 
@@ -926,8 +927,94 @@ class QQBotServer:
 
         await self._reply(event, reply)
 
+    def _extract_message(self, event: dict) -> tuple[str, str]:
+        """从事件中提取文字消息和表情描述（支持 VL 视觉理解）"""
+        raw = (event.get("raw_message", "") or "").strip()
+        msg = event.get("message", "")
+        sticker_text = ""
+
+        # 尝试从 message list 中提取图片 URL
+        if isinstance(msg, list):
+            parts = []
+            for seg in msg:
+                if not isinstance(seg, dict):
+                    continue
+                seg_type = seg.get("type", "")
+                seg_data = seg.get("data", {}) or {}
+
+                if seg_type == "text":
+                    parts.append(seg_data.get("text", ""))
+                elif seg_type == "mface":
+                    name = seg_data.get("name", seg_data.get("text", ""))
+                    # 尝试用 VL API 理解表情包
+                    url = seg_data.get("url", "")
+                    desc = self._describe_image(url) if url else ""
+                    sticker_text = f"[发送了{name}表情包: {desc}]" if desc else f"[发送了{name}表情包]"
+                elif seg_type == "image":
+                    url = seg_data.get("url", "")
+                    desc = self._describe_image(url) if url else ""
+                    sticker_text = desc if desc else "[发送了一张图片]"
+                elif seg_type == "face":
+                    if not sticker_text:
+                        sticker_text = "[表情]"
+
+            if parts and not raw:
+                raw = "".join(parts)
+
+        return raw, sticker_text
+
+    def _describe_image(self, url: str) -> str:
+        """调用多模态 API 描述图片内容"""
+        if not url or len(url) < 10:
+            return ""
+        try:
+            cfg = get_config().llm
+            api_key = cfg.get("api_key", "")
+            base_url = cfg.get("base_url", "https://api.openai.com/v1").rstrip("/")
+
+            with httpx.Client(base_url=base_url, timeout=30.0, headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }) as client:
+                resp = client.post("/chat/completions", json={
+                    "model": cfg.get("model", "qwen-vl-plus"),
+                    "messages": [
+                        {"role": "user", "content": [
+                            {"type": "text", "text": "用一句话描述这个图片/表情包的内容和情绪"},
+                            {"type": "image_url", "image_url": {"url": url}},
+                        ]},
+                    ],
+                    "max_tokens": 100,
+                })
+                if resp.status_code == 200:
+                    return resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.debug("VL 描述失败: %s", e)
+        return ""
+
+    # ---- MCP 工具集成 ----
+
+    async def _mcp_search(self, query: str) -> str:
+        """网络搜索工具"""
+        import urllib.parse
+        try:
+            url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(query)}&format=json&no_html=1"
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                resp = await c.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    abstract = data.get("AbstractText", "")
+                    if abstract:
+                        return abstract[:300]
+                    related = data.get("RelatedTopics", [])
+                    if related:
+                        return related[0].get("Text", "")[:300]
+            return ""
+        except Exception as e:
+            logger.debug("搜索失败: %s", e)
+            return ""
+
     @staticmethod
-    def _extract_message(event: dict) -> tuple[str, str]:
         """
         从事件中提取文字消息和表情描述
         返回 (raw_text, sticker_description)
