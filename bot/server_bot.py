@@ -557,24 +557,28 @@ class QQBotServer:
     # ---- WebSocket 回复（含多段拆分） ----
 
     async def _reply(self, event: dict, text: str):
-        """通过 WebSocket 发送回复（自动拆分多段 + 群聊 @）"""
+        """通过 WebSocket 发送回复（自然拆分 + 打字延迟）"""
         if not self._ws:
             logger.warning("WebSocket 未连接，无法发送回复")
             return
 
         import re
+        import random
         # 将 [face:ID] 转为 QQ 表情 CQ 码
         text = re.sub(r'\[face:(\d+)\]', r'[CQ:face,id=\1]', text)
-        # 将连续换行转为 [pause] 分段发送（避免消息内出现空行）
-        text = re.sub(r'\n\s*\n', '[pause]', text)
-        # 去除单行换行（只保留分段意义）
+        # 去除换行
         text = text.replace('\n', '')
 
         msg_type = event.get("message_type", "private")
         user_id = event.get("user_id")
         self._msg_id += 1
 
-        # 拆分为多个片段，模拟角色自然停顿
+        # 模拟真人打字延迟（短消息0.3-0.8s，长消息0.8-2s）
+        delay = min(0.3 + len(text) * 0.008, 2.0)
+        delay = delay * random.uniform(0.8, 1.2)
+        await asyncio.sleep(delay)
+
+        # 按自然句子拆分
         segs = self._split_message(text)
 
         for i, seg in enumerate(segs):
@@ -651,11 +655,40 @@ class QQBotServer:
             await self._reply(event, "角色文件不存在")
 
     @staticmethod
+    @staticmethod
     def _split_message(text: str) -> list[str]:
-        if "[pause]" not in text:
+        """按自然句子拆分，模拟真人分段说话"""
+        import re
+        # 先处理显式的 [pause] 标记
+        if "[pause]" in text:
+            parts = [p.strip() for p in text.split("[pause]") if p.strip()]
+            # 每段再按句子拆分
+            result = []
+            for p in parts:
+                result.extend(QQBotServer._split_sentences(p))
+            return [r for r in result if r] if result else [text]
+
+        # 无 [pause] 时按句子拆分
+        sentences = QQBotServer._split_sentences(text)
+        # 如果拆完后只有一段或一段非常短，就不拆了
+        if len(sentences) <= 1 or len(text) < 30:
             return [text]
-        parts = [p.strip() for p in text.split("[pause]") if p.strip()]
-        return parts if parts else [text]
+        # 太短的分句和前一句合并
+        merged = []
+        for s in sentences:
+            if merged and len(s) < 6:
+                merged[-1] += s
+            else:
+                merged.append(s)
+        return merged if len(merged) > 1 else [text]
+
+    @staticmethod
+    def _split_sentences(text: str) -> list[str]:
+        """按句号、问号、感叹号、省略号拆句子"""
+        import re
+        # 在 [CQ:...] 内部不拆分
+        parts = re.split(r'(?<=[。？！……!?])(?![^\[]*\])', text)
+        return [p.strip() for p in parts if p.strip()]
 
     # ---- 主动对话 ----
 
