@@ -149,7 +149,9 @@ class QQBotServer:
         msg_type = event.get("message_type", "")  # private | group
         user_id = str(event.get("user_id", ""))
         bind_key = self._get_bind_key(event)  # private_xxx or group_xxx
-        raw_message = (event.get("raw_message", "") or event.get("message", "")).strip()
+        raw_message, sticker_text = self._extract_message(event)
+        if sticker_text and not raw_message.strip():
+            raw_message = sticker_text
         raw_message = self._clean_message(raw_message)
 
         if not raw_message or not bind_key:
@@ -758,6 +760,43 @@ class QQBotServer:
             reply = f"已切换至{name}，开始对话吧。"
 
         await self._reply(event, reply)
+
+    @staticmethod
+    def _extract_message(event: dict) -> tuple[str, str]:
+        """
+        从事件中提取文字消息和表情描述
+        返回 (raw_text, sticker_description)
+        """
+        raw = (event.get("raw_message", "") or "").strip()
+        msg = event.get("message", "")
+
+        sticker_text = ""
+
+        # 如果 message 是列表格式，从中提取 sticker 信息
+        if isinstance(msg, list):
+            parts = []
+            for seg in msg:
+                if not isinstance(seg, dict):
+                    continue
+                seg_type = seg.get("type", "")
+                seg_data = seg.get("data", {}) or {}
+
+                if seg_type == "text":
+                    parts.append(seg_data.get("text", ""))
+                elif seg_type == "mface":
+                    name = seg_data.get("name", seg_data.get("text", ""))
+                    sticker_text = f"[发送了{name}表情包]"
+                elif seg_type == "image":
+                    if not sticker_text:
+                        sticker_text = "[发送了一张图片]"
+                elif seg_type == "face":
+                    if not sticker_text:
+                        sticker_text = "[表情]"
+
+            if parts and not raw:
+                raw = "".join(parts)
+
+        return raw, sticker_text
 
     @staticmethod
     def _clean_message(text: str) -> str:
