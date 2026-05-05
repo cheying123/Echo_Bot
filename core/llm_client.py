@@ -141,7 +141,8 @@ class OpenAIClient(LLMClient):
                 resp = await self._http_client.post("/chat/completions", json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                return data["choices"][0]["message"]["content"].strip()
+                content = data["choices"][0]["message"].get("content", "")
+                return content.strip() if content else ""
 
             except Exception as e:
                 last_error = e
@@ -203,14 +204,26 @@ class OpenAIClient(LLMClient):
     # ---- 内部 ----
 
     def _build_payload(self, system_prompt, messages, temperature, max_tokens):
-        openai_messages = [{"role": "system", "content": system_prompt}]
-        openai_messages.extend(m.to_openai() for m in messages)
-        return {
-            "model": self.model,
-            "messages": openai_messages,
-            "temperature": temperature if temperature is not None else self.default_temperature,
-            "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
-        }
+        is_reasoner = "reasoner" in self.model
+
+        if is_reasoner:
+            # DeepSeek reasoner 不支持 system 角色和 temperature
+            openai_messages = [{"role": "user", "content": system_prompt}]
+            openai_messages.extend(m.to_openai() for m in messages)
+            return {
+                "model": self.model,
+                "messages": openai_messages,
+                "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
+            }
+        else:
+            openai_messages = [{"role": "system", "content": system_prompt}]
+            openai_messages.extend(m.to_openai() for m in messages)
+            return {
+                "model": self.model,
+                "messages": openai_messages,
+                "temperature": temperature if temperature is not None else self.default_temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
+            }
 
     @staticmethod
     def _resolve_proxy(config: dict) -> str | None:
