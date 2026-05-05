@@ -84,6 +84,7 @@ DEFAULT_CONFIG = {
     "dialogue": {
         "max_response_length": 100,
         "enable_action_description": True,
+        "self_review": True,  # 是否启用自审重写（增加API消耗但提升回复质量）
     },
     # ---- 安全 ----
     "security": {

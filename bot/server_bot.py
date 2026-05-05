@@ -278,6 +278,8 @@ class QQBotServer:
         # 风格学习（群聊 + 个人）
         self._learn_group_style(bind_key, message)
         self._learn_user_style(user_id, message)
+        # 不回复也轻量保存用户画像
+        self._save_user_traits(user_id, message)
 
     def _learn_group_style(self, bind_key: str, message: str):
         """从消息中学习群聊的说话风格"""
@@ -303,6 +305,77 @@ class QQBotServer:
         endings = re.findall(r'[。！？～~嘛啦哦呢哎哟哇]|[哈]+$', message.strip())
         for e in endings:
             style["endings"][e] = style["endings"].get(e, 0) + 1
+
+    def _save_user_traits(self, user_id: str, message: str):
+        """每消息轻量分析：情绪+性格+兴趣，不回复也记录"""
+        import re
+        try:
+            profile = self.engine.profile_mgr.get_or_create_profile(f"user_{user_id}")
+            all_chars = self.engine.char_mgr.list_characters()
+
+            # ---- 情绪检测 ----
+            mood = self._detect_mood(message)
+
+            for c in all_chars:
+                cm = profile.get_or_create_char_memory(c["id"])
+                cm.conversation_count += 1
+
+                # 记录情绪
+                if mood and mood != "neutral":
+                    cm.emotional_history.append({"mood": mood, "timestamp": datetime.now().isoformat()})
+                    if len(cm.emotional_history) > 30:
+                        cm.emotional_history = cm.emotional_history[-30:]
+
+                # ---- 性格特征检测 ----
+                trait = self._detect_trait(message)
+                if trait and trait not in cm.observed_traits:
+                    cm.observed_traits.append(trait)
+
+                # ---- 兴趣关键词提取 ----
+                interest_keywords = ["喜欢", "想学", "想玩", "最近在看", "推荐", "好玩", "好看"]
+                for kw in interest_keywords:
+                    if kw in message:
+                        # 取关键词后面的内容
+                        idx = message.find(kw) + len(kw)
+                        topic = message[idx:idx+15].strip().rstrip("，。！？的了")
+                        if topic and len(topic) >= 2:
+                            # 检查是否已经是兴趣的一部分
+                            existing = [i for i in cm.observed_interests if topic[:6] in i or any(word in i for word in topic.split())]
+                            if not existing:
+                                cm.observed_interests.append(topic)
+                                break
+                break  # 只处理第一个角色
+            self.engine.profile_mgr.save_profile(profile)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _detect_mood(message: str) -> str:
+        """从文本中检测情绪（轻量关键词版）"""
+        if any(w in message for w in ["😂", "🤣", "笑死", "太棒", "开心", "高兴", "哈哈", "嘻嘻", "好爽", "绝了", "爱了"]):
+            return "positive"
+        if any(w in message for w in ["😭", "😢", "难过", "伤心", "想哭", "失落", "低落"]):
+            return "sad"
+        if any(w in message for w in ["😡", "🤬", "气死", "烦死", "无语", "火大", "忍不"]):
+            return "angry"
+        if any(w in message for w in ["累", "压力", "烦躁", "焦虑", "好烦", "难受", "唉"]):
+            return "negative"
+        return "neutral"
+
+    @staticmethod
+    def _detect_trait(message: str) -> str:
+        """从文本中检测性格特征"""
+        import re
+        if re.search(r'我[就]?是[个]?(废物|菜|不行|垃圾)', message):
+            return "喜欢自嘲"
+        if re.search(r'哈哈|笑死|hhh|hah|😂|🤣', message) and len(message) < 30:
+            return "开朗"
+        if message.startswith("我觉得") or message.startswith("我认为"):
+            return "有主见"
+        if "?" in message or "？" in message:
+            if len(message) < 20:
+                return "爱提问"
+        return ""
 
     def _learn_user_style(self, user_id: str, message: str):
         """从用户消息中学习个人说话风格"""

@@ -146,6 +146,19 @@ class DialogueEngine:
             user_id, character_id, len(raw_response), elapsed,
         )
 
+        # 5.1) 自审与重写（最多改 1 次，可开关）
+        if self.cfg.get("dialogue", "self_review", default=True):
+            review = await self._self_review(
+                character, user_message, raw_response, system_prompt,
+            )
+            if not review.get("pass", True):
+                feedback = review.get("feedback", "")
+                logger.info("自审未通过，重写中... feedback=%s", feedback[:50])
+                raw_response = await self._rewrite_response(
+                    character, user_message, raw_response, feedback, system_prompt,
+                )
+                self.total_calls += 1
+
         # 更新最后活动时间
         char_memory.last_message_at = datetime.now().isoformat()
         self.total_time += elapsed
@@ -337,3 +350,64 @@ class DialogueEngine:
             )
         except Exception as e:
             logger.error("后台记录日志失败: %s", e)
+
+    # ---- 自审与重写 ----
+
+    async def _self_review(
+        self,
+        character: CharacterCard,
+        user_message: str,
+        response: str,
+        system_prompt: str,
+    ) -> dict:
+        """让 AI 判断自己的回复是否合格"""
+        try:
+            review_prompt = (
+                "你是一个对话质量评审员。请评审以下角色对用户的回复，判断是否符合以下标准：\n"
+                "1. 语气自然，像真人对话而不是机械回答\n"
+                "2. 符合角色性格和说话风格\n"
+                "3. 回应了用户的核心诉求\n"
+                "4. 长度合适，不啰嗦\n\n"
+                f"角色设定：{character.name}（{character.personality.speaking_style[:100]}）\n"
+                f"用户消息：{user_message}\n"
+                f"角色回复：{response}\n\n"
+                "请按JSON格式输出：{\"pass\": true/false, \"feedback\": \"如果不通过，给出具体修改建议（一句话）\"}"
+            )
+            result = await self.llm.chat(
+                system_prompt="你是一个严格的对话质量评审员，只判断是否符合标准，不要夸夸其谈。",
+                messages=[LLMMessage(role="user", content=review_prompt)],
+                max_tokens=200,
+            )
+            import json as _json
+            try:
+                review = _json.loads(result.strip())
+                return {"pass": review.get("pass", True), "feedback": review.get("feedback", "")}
+            except Exception:
+                return {"pass": True, "feedback": ""}
+        except Exception:
+            return {"pass": True, "feedback": ""}
+
+    async def _rewrite_response(
+        self,
+        character: CharacterCard,
+        user_message: str,
+        original: str,
+        feedback: str,
+        system_prompt: str,
+    ) -> str:
+        """根据评审反馈重写回复"""
+        try:
+            rewrite_prompt = (
+                f"你之前的回复需要改进。\n"
+                f"用户消息：{user_message}\n"
+                f"你之前的回复：{original}\n"
+                f"改进建议：{feedback}\n\n"
+                f"请以{character.name}的身份重新回答，保持角色性格和说话风格。"
+            )
+            result = await self.llm.chat(
+                system_prompt=system_prompt,
+                messages=[LLMMessage(role="user", content=rewrite_prompt)],
+            )
+            return result.strip()
+        except Exception:
+            return original
