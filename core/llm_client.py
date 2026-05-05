@@ -204,7 +204,7 @@ class OpenAIClient(LLMClient):
     # ---- 内部 ----
 
     def _build_payload(self, system_prompt, messages, temperature, max_tokens):
-        is_reasoner = "reasoner" in self.model
+        is_reasoner = "reasoner" in self.model and "v4" not in self.model
 
         if is_reasoner:
             # DeepSeek reasoner 不支持 system 角色和 temperature

@@ -619,29 +619,33 @@ class QQBotServer:
 
     async def _cmd_status(self, bind_key: str, event: dict):
         """显示当前角色的情绪、关系和语气"""
-        profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
         char_id = self._get_user_character(bind_key)
         if not char_id:
             await self._reply(event, "请先绑定角色。")
             return
 
-        card = self.engine.char_mgr.get_character(char_id)
-        name = card.name if card else char_id
+        # 合并群聊+私聊数据
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+        profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
+        user_profile = self.engine.profile_mgr.get_or_create_profile(f"user_{user_id}")
         cm = profile.get_or_create_char_memory(char_id)
+        user_cm = user_profile.get_or_create_char_memory(char_id)
 
-        # 最近情绪
-        recent_mood = "未知"
+        # 从两个来源合并情绪
+        all_moods = []
         if cm.emotional_history:
-            recent = cm.emotional_history[-1]
-            recent_mood = recent.get("mood", "neutral")
+            all_moods.extend(m.get("mood", "") for m in cm.emotional_history)
+        if user_cm.emotional_history:
+            all_moods.extend(m.get("mood", "") for m in user_cm.emotional_history)
+        recent_mood = all_moods[-1] if all_moods else "未知"
 
-        # 语气建议
-        tone = cm.last_tonal_suggestion or "默认"
+        tone = cm.last_tonal_suggestion or user_cm.last_tonal_suggestion or "默认"
+        stage = cm.relationship_stage if cm.relationship_stage != "陌生人" else user_cm.relationship_stage
 
         lines = [
-            f"【{name}】",
+            f"【{card.name if (card := self.engine.char_mgr.get_character(char_id)) else char_id}】",
             f"情绪: {recent_mood}",
-            f"关系: {cm.relationship_stage}",
+            f"关系: {stage}",
             f"语气: {tone}",
         ]
         await self._reply(event, "\n".join(lines))
@@ -920,9 +924,10 @@ class QQBotServer:
                 logger.error("WebSocket 发送消息失败: %s", e)
                 return
 
-            # 片段之间停顿 0.6-1.2 秒，模拟思考节奏
+            # 片段之间停顿 0.8-1.8 秒，模拟真实思考节奏
             if i < len(segs) - 1:
-                await asyncio.sleep(0.6 + (i * 0.2))
+                import random as _rnd2
+                await asyncio.sleep(0.8 + _rnd2.random() * 1.0 + i * 0.15)
 
     # ---- 角色管理 ----
 

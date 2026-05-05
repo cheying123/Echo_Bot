@@ -91,9 +91,15 @@ class ProfileManager:
         profile = self.get_or_create_profile(user_id)
         char_memory = profile.get_or_create_char_memory(character_id)
 
-        # 1) 合并性格特征（去重）
+        # 1) 合并性格特征（去重+过滤）
+        import re
         for trait in memory.observations.new_traits:
-            if trait and trait not in char_memory.observed_traits:
+            if not trait:
+                continue
+            # 过滤：太长的句子、含标点的、明显不是性格标签的
+            if len(trait) > 15 or re.search(r'[，。！？、]', trait):
+                continue
+            if trait not in char_memory.observed_traits:
                 char_memory.observed_traits.append(trait)
 
         # 2) 合并兴趣（去重）
