@@ -233,6 +233,7 @@ class QQBotServer:
                 user_message=raw_message,
                 user_id=memory_user,
                 character_id=character_id,
+                is_group=(msg_type == "group"),
             )
 
             # 群聊时也按 QQ 号保存一份用户画像

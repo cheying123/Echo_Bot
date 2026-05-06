@@ -562,25 +562,29 @@ class ProfileManager:
     # ---- 内部方法 ----
 
     def _update_relationship(self, char_memory: PerCharacterMemory, memory: MemoryBlock):
-        """根据 AI 建议更新关系状态，后端控制晋升逻辑"""
+        """根据 AI 建议 + 对话轮数更新关系状态"""
         current = char_memory.relationship_stage
 
-        # 从 AI 建议中提取信号
-        trust_signal = memory.relationship.trust_signal
-        affection_signal = memory.relationship.affection_signal
+        # 信任/好感按对话轮数自动增长（兜底，不依赖 AI 信号）
+        conv = char_memory.conversation_count
+        auto_trust = min(10, 1 + conv // 10)
+        auto_affection = min(10, 1 + conv // 8)
+        if auto_trust > char_memory.trust_level:
+            char_memory.trust_level = auto_trust
+        if auto_affection > char_memory.affection_level:
+            char_memory.affection_level = auto_affection
 
-        # 信任度/好感度数值调整（范围 1-10）
-        if trust_signal == "提升":
+        # AI 信号额外调整
+        if memory.relationship.trust_signal == "提升":
             char_memory.trust_level = min(10, char_memory.trust_level + 1)
-        elif trust_signal == "下降":
+        elif memory.relationship.trust_signal == "下降":
             char_memory.trust_level = max(1, char_memory.trust_level - 1)
-
-        if affection_signal == "提升":
+        if memory.relationship.affection_signal == "提升":
             char_memory.affection_level = min(10, char_memory.affection_level + 1)
-        elif affection_signal == "下降":
+        elif memory.relationship.affection_signal == "下降":
             char_memory.affection_level = max(1, char_memory.affection_level - 1)
 
-        # 关系阶段晋升规则（后端控制，不依赖 AI 判断）
+        # 关系阶段晋升
         try:
             current_stage = RelationshipStage(current)
         except ValueError:
@@ -588,23 +592,21 @@ class ProfileManager:
 
         new_stage = current_stage
 
-        # 晋升条件
-        if (
-            current_stage == RelationshipStage.STRANGER
-            and char_memory.conversation_count >= 5
-        ):
+        tl = char_memory.trust_level
+        al = char_memory.affection_level
+        if current_stage == RelationshipStage.STRANGER and conv >= 5:
             new_stage = RelationshipStage.ACQUAINTED
         elif (
             current_stage == RelationshipStage.ACQUAINTED
-            and char_memory.conversation_count >= 20
-            and char_memory.trust_level >= 4
+            and conv >= 20
+            and tl >= 3
         ):
             new_stage = RelationshipStage.FAMILIAR
         elif (
             current_stage == RelationshipStage.FAMILIAR
-            and char_memory.conversation_count >= 50
-            and char_memory.trust_level >= 7
-            and char_memory.affection_level >= 6
+            and conv >= 50
+            and tl >= 6
+            and al >= 5
         ):
             new_stage = RelationshipStage.CLOSE
         elif (

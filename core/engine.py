@@ -98,6 +98,7 @@ class DialogueEngine:
         user_message: str,
         user_id: str,
         character_id: str,
+        is_group: bool = False,
     ) -> Tuple[str, Optional[dict]]:
         """
         处理一条用户消息，返回 (AI回复文本, MEMORY数据或None)
@@ -120,6 +121,7 @@ class DialogueEngine:
             profile=profile,
             char_memory=char_memory,
             user_message=user_message,
+            is_group=is_group,
         )
 
         # 4) 获取最近对话历史
@@ -220,6 +222,7 @@ class DialogueEngine:
             profile=profile,
             char_memory=char_memory,
             user_message=user_message,
+            is_group=is_group,
         )
 
         history = self.context_mgr.get_clean_history(user_id, character_id)

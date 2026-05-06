@@ -169,7 +169,8 @@ class PromptBuilder:
         profile: UserProfile,
         char_memory: Optional[PerCharacterMemory] = None,
         current_time: Optional[str] = None,
-        user_message: str = "",  # 当前用户消息，用于检索相关台词
+        user_message: str = "",  # 当前用户消息
+        is_group: bool = False,，用于检索相关台词
     ) -> str:
         """构建系统提示词"""
         from datetime import datetime
@@ -240,7 +241,12 @@ class PromptBuilder:
             if dia_cfg.allow_action_description is not None
             else self.cfg.dialogue.get("enable_action_description", True)
         )
-        action_rule = "可以适当使用动作描写（如*低头*、*侧过脸*）增强沉浸感，但不宜过多。" if action_enabled else "不要使用动作描写。"
+        if is_group:
+            action_rule = "群聊中不要使用动作描写（用纯文字表达）。"
+        elif action_enabled:
+            action_rule = "可以适当使用动作描写（如*低头*、*侧过脸*）增强沉浸感，但不宜过多。"
+        else:
+            action_rule = "不要使用动作描写。"
 
         # 表情包规则
         sticker_rule = ""
