@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.models import ConversationContext, ConversationTurn
 
@@ -88,13 +88,53 @@ class ContextManager:
         ctx = self.get_or_create(user_id, character_id)
         return ctx.character_turns
 
-    def should_summarize(self, user_id: str, character_id: str, interval: int = 10) -> bool:
+    def should_summarize(
+        self,
+        user_id: str,
+        character_id: str,
+        char_memory: Any = None,
+        interval: int = 10,
+    ) -> bool:
         """
-        判断是否需要生成中期摘要。
-        当角色回复次数达到 interval 的倍数时返回 True。
+        触发式判断是否需要生成中期摘要。
+        当话题切换、情绪波动或关键信息出现时触发。
+        兜底：超过 interval*1.5 轮时强制生成。
         """
         count = self.get_conversation_count(user_id, character_id)
-        return count > 0 and count % interval == 0
+        if count < 5:
+            return False
+
+        # 兜底：超过 interval*1.5 轮强制生成
+        if count >= interval * 1.5 and count % 5 == 0:
+            return True
+
+        # 每 interval 轮检查一次触发条件
+        if count % interval != 0:
+            return False
+
+        if char_memory is None:
+            return False
+
+        # 触发条件 1：情绪波动（最近 3 条情绪各不相同或变化剧烈）
+        recent_moods = [e.get("mood", "") for e in char_memory.emotional_history[-3:]]
+        if len(set(recent_moods)) >= 2 and len(recent_moods) >= 2:
+            return True
+
+        # 触发条件 2：新特征出现（最近 5 轮有新的性格标签）
+        if len(char_memory.observed_traits) > 0 and count < 50:
+            return True
+
+        # 触发条件 3：新兴趣出现
+        if len(char_memory.observed_interests) > 0 and count < 30:
+            return True
+
+        # 触发条件 4：对话密度高（短时间内多轮）
+        ctx = self.get_or_create(user_id, character_id)
+        recent = ctx.get_recent_turns(5)
+        if len(recent) >= 5:
+            return True
+
+        return False
 
     def clear_context(self, user_id: str, character_id: str):
         """清空某个对话的短期上下文"""

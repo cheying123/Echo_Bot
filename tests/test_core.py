@@ -297,10 +297,19 @@ class TestContextManager(unittest.TestCase):
         self.assertLessEqual(len(history), 4)
 
     def test_should_summarize(self):
-        for i in range(3):
+        from core.models import PerCharacterMemory
+        # 添加足够多的对话轮次（至少 5 轮才触发摘要）
+        for i in range(6):
             self.ctx.add_user_message(self.uid, self.cid, f"msg{i}")
             self.ctx.add_assistant_message(self.uid, self.cid, f"reply{i}")
-        self.assertTrue(self.ctx.should_summarize(self.uid, self.cid, interval=3))
+
+        cm = PerCharacterMemory()
+        cm.conversation_count = 6
+        cm.emotional_history.append({"mood": "positive"})
+        cm.emotional_history.append({"mood": "negative"})
+        # 情绪波动 + 达到 interval 倍数 → 触发
+        result = self.ctx.should_summarize(self.uid, self.cid, char_memory=cm, interval=3)
+        self.assertTrue(result)
 
     def test_separate_conversations(self):
         self.ctx.add_user_message(self.uid, self.cid, "你好")

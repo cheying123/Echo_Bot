@@ -78,6 +78,16 @@ class DialogueRetriever:
         # 按分数降序
         scored.sort(key=lambda x: x[1], reverse=True)
 
+        # 动态阈值：只保留分数高于平均值的台词
+        if scored:
+            scores = [s for _, s in scored]
+            mean = sum(scores) / len(scores)
+            # 标准差
+            var = sum((s - mean) ** 2 for s in scores) / len(scores)
+            std = var ** 0.5
+            threshold = max(mean - std * 0.3, 0.01)
+            scored = [(l, s) for l, s in scored if s >= threshold]
+
         # 去重（去掉开头过于相似的台词）
         unique = []
         seen_prefixes = set()

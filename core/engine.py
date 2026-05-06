@@ -189,7 +189,7 @@ class DialogueEngine:
 
         # 10) 检查是否需要生成中期摘要
         if self.context_mgr.should_summarize(
-            user_id, character_id,
+            user_id, character_id, char_memory=char_memory,
             interval=self.cfg.memory.get("summary_interval", 10),
         ):
             asyncio.ensure_future(
