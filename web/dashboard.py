@@ -66,7 +66,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.end_headers()
             html = HTML_PATH.read_text(encoding="utf-8")
             self.wfile.write(html.encode())
-        elif self.path == "/api/characters":
+        elif self.path in ("/api/chars", "/api/characters"):
             self._send_json(self._load_character_list())
         elif self.path == "/api/system":
             self._send_json({
