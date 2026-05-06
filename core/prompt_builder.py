@@ -30,6 +30,7 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 
 【姓名】{char_name}
 【出处】{char_source}
+{group_chat_warning}
 【性格核心】{char_core_traits}
 【说话风格】{char_speaking_style}
 【习惯动作】{char_habits}
@@ -241,8 +242,11 @@ class PromptBuilder:
             if dia_cfg.allow_action_description is not None
             else self.cfg.dialogue.get("enable_action_description", True)
         )
+        # 群聊警告（放在角色名字下面，确保 AI 第一时间看到）
+        group_chat_warning = "【注意：当前是群聊，不要使用任何动作/语气/表情描写（如*笑*、*点头*、（叹气）等），只发纯对话文字。】" if is_group else ""
+
         if is_group:
-            action_rule = "群聊中不要使用动作描写（用纯文字表达）。"
+            action_rule = "群聊中不要使用任何动作、语气、表情描写（包括*动作*和（表情）等形式），只发纯对话文字。像正常人聊天一样说话就好。"
         elif action_enabled:
             action_rule = "可以适当使用动作描写（如*低头*、*侧过脸*）增强沉浸感，但不宜过多。"
         else:
@@ -260,6 +264,7 @@ class PromptBuilder:
         prompt = SYSTEM_PROMPT_TEMPLATE.format(
             char_name=character.name,
             char_source=character.source or "未知出处",
+            group_chat_warning=group_chat_warning,
             char_core_traits=char_core,
             char_speaking_style=character.personality.speaking_style or "（无设定）",
             char_habits=char_habits,
