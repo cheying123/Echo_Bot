@@ -191,6 +191,11 @@ class QQBotServer:
                 elif not await self._should_chime_in(bind_key, event):
                     return
 
+        # 私聊也做轻量画像采集
+        if msg_type == "private":
+            self._learn_user_style(user_id, raw_message)
+            self._save_user_traits(user_id, raw_message)
+
         # 保存事件用于主动对话
         await self._store_event(bind_key, event)
 
@@ -648,10 +653,17 @@ class QQBotServer:
             if s and s != "陌生人":
                 stage = s
 
+        name = card.name if (card := self.engine.char_mgr.get_character(char_id)) else char_id
+        # 取对话数（从三个来源合并）
+        total_convs = cm.conversation_count + user_cm.conversation_count + bare_cm.conversation_count
+        avg_trust = max(cm.trust_level, user_cm.trust_level, bare_cm.trust_level)
+
         lines = [
-            f"【{card.name if (card := self.engine.char_mgr.get_character(char_id)) else char_id}】",
+            f"【{name}】",
+            f"对话: {total_convs} 轮",
             f"情绪: {recent_mood}",
             f"关系: {stage}",
+            f"信任: {avg_trust}/10",
             f"语气: {tone}",
         ]
         await self._reply(event, "\n".join(lines))
@@ -894,7 +906,7 @@ class QQBotServer:
         self._msg_id += 1
 
         # 带格式的文字一条发完，不拆分不延迟
-        has_bullets = "  /" in text or "🎭" in text or "☀️" in text or "🔧" in text or "├─" in text or "📋" in text
+        has_bullets = "  /" in text or "🎭" in text or "☀️" in text or "🔧" in text or "├─" in text or "📋" in text or "【" in text or "对话:" in text
         if has_bullets:
             segs = [text]
         else:
