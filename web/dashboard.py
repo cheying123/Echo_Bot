@@ -67,7 +67,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             html = HTML_PATH.read_text(encoding="utf-8")
             self.wfile.write(html.encode())
         elif self.path in ("/api/chars", "/api/characters"):
-            self._send_json(self._load_character_list())
+            self._send_json({"chars": self._load_character_list()})
         elif self.path == "/api/system":
             self._send_json({
                 "version": "1.0.0",
