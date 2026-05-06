@@ -134,7 +134,7 @@ async function load() {
     ' | API调用: ' + status.api_calls;
 
   const data = await api('/api/characters', 'GET');
-  chars = data;
+  chars = data.chars || data || [];
   renderList();
 
   const sysData = await api('/api/system', 'GET');
