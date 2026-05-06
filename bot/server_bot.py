@@ -567,9 +567,10 @@ class QQBotServer:
                 await self._reply(event, "用法: /档案 或 /档案 <QQ号> 查看别人的画像")
                 return
 
-        # 获取用户的所有画像数据（私聊 + 群聊 + 跨角色）
+        # 获取用户的所有画像数据（私聊 + 群聊 + bare QQ）
         profile = self.engine.profile_mgr.get_or_create_profile(target_key)
         user_profile = self.engine.profile_mgr.get_or_create_profile(f"user_{target_user_id}")
+        bare_profile = self.engine.profile_mgr.get_or_create_profile(target_user_id)
         is_self = target_user_id == bind_key.replace("private_", "").replace("group_", "")
 
         # 遍历所有角色的记忆，合并为一个统一画像
@@ -582,6 +583,7 @@ class QQBotServer:
         all_memories = {}
         all_memories.update(profile.per_character_memory)
         all_memories.update(user_profile.per_character_memory)
+        all_memories.update(bare_profile.per_character_memory)
 
         for char_id, cm in all_memories.items():
             traits.update(cm.observed_traits)
@@ -624,23 +626,27 @@ class QQBotServer:
             await self._reply(event, "请先绑定角色。")
             return
 
-        # 合并群聊+私聊数据
+        # 合并三个来源的数据
         user_id = bind_key.replace("private_", "").replace("group_", "")
         profile = self.engine.profile_mgr.get_or_create_profile(bind_key)
         user_profile = self.engine.profile_mgr.get_or_create_profile(f"user_{user_id}")
+        bare_profile = self.engine.profile_mgr.get_or_create_profile(user_id)  # 私聊存在 bare QQ 号下
         cm = profile.get_or_create_char_memory(char_id)
         user_cm = user_profile.get_or_create_char_memory(char_id)
+        bare_cm = bare_profile.get_or_create_char_memory(char_id)
 
-        # 从两个来源合并情绪
+        # 从三个来源合并
         all_moods = []
-        if cm.emotional_history:
-            all_moods.extend(m.get("mood", "") for m in cm.emotional_history)
-        if user_cm.emotional_history:
-            all_moods.extend(m.get("mood", "") for m in user_cm.emotional_history)
+        for src in [cm, user_cm, bare_cm]:
+            if src and src.emotional_history:
+                all_moods.extend(m.get("mood", "") for m in src.emotional_history)
         recent_mood = all_moods[-1] if all_moods else "未知"
 
-        tone = cm.last_tonal_suggestion or user_cm.last_tonal_suggestion or "默认"
-        stage = cm.relationship_stage if cm.relationship_stage != "陌生人" else user_cm.relationship_stage
+        tone = cm.last_tonal_suggestion or user_cm.last_tonal_suggestion or bare_cm.last_tonal_suggestion or "默认"
+        stage = cm.relationship_stage
+        for s in [user_cm.relationship_stage, bare_cm.relationship_stage]:
+            if s and s != "陌生人":
+                stage = s
 
         lines = [
             f"【{card.name if (card := self.engine.char_mgr.get_character(char_id)) else char_id}】",

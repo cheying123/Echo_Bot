@@ -118,6 +118,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
             pb = PromptBuilder()
             profile = UserProfile(user_id="debug")
             cmem = profile.get_or_create_char_memory(card.name)
+            extra = body.get("extra", "")
+            if extra:
+                try:
+                    ed = json.loads(extra)
+                    if "mood" in ed:
+                        cmem.emotional_history.append({"mood": ed["mood"], "timestamp": "2026-01-01T00:00:00"})
+                    if "stage" in ed:
+                        cmem.relationship_stage = ed["stage"]
+                    if "tone" in ed:
+                        cmem.last_tonal_suggestion = ed["tone"]
+                except Exception:
+                    pass
             prompt = pb.build_system_prompt(character=card, user_id="debug", profile=profile, char_memory=cmem, user_message=body.get("message", ""))
             self._send_json({"status": "ok", "prompt": prompt, "length": len(prompt), "char_name": card.name, "time": "0.1s"})
         elif self.path == "/api/test/memory":
