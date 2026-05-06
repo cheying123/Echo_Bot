@@ -47,6 +47,7 @@ body { font-family:-apple-system,'Segoe UI',sans-serif; background:#f5f5f5; colo
   <div class="nav">
     <a href="#" class="active" onclick="showTab('characters')">角色管理</a>
     <a href="#" onclick="showTab('settings')">系统设置</a>
+    <a href="#" onclick="showTab('tests')">功能测试</a>
     <a href="#" onclick="showTab('plugins')">插件管理</a>
   </div>
 
@@ -68,6 +69,30 @@ body { font-family:-apple-system,'Segoe UI',sans-serif; background:#f5f5f5; colo
       <p style="color:#888;font-size:13px;margin-bottom:8px">压缩过时的特征标签（30天无更新自动移除）</p>
       <button class="btn btn-primary" onclick="compressMem()">压缩记忆</button>
       <div id="compress-result"></div>
+    </div>
+  </div>
+
+  <div id="tab-tests" class="hidden">
+    <div class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">
+        <span>模块测试</span>
+        <span style="font-size:12px;color:#888">测试各模块功能是否正确运行</span>
+      </h2>
+      <div style="display:grid;gap:12px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="test-char" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px"></select>
+          <input id="test-query" placeholder="测试输入..." style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;flex:1">
+          <button class="btn btn-primary" onclick="testPrompt()">提示词</button>
+          <button class="btn btn-primary" onclick="testRetriever()">检索</button>
+          <button class="btn btn-primary" onclick="testSplit()">拆分</button>
+          <button class="btn btn-primary" onclick="testMemory()">MEMORY</button>
+          <button class="btn btn-primary" onclick="testScheduler()">时间</button>
+          <button class="btn btn-primary" onclick="runTests()">全量</button>
+        </div>
+        <div id="test-result" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;font-family:monospace;font-size:12px;min-height:100px;white-space:pre-wrap;overflow-x:auto">
+          点击按钮运行测试，结果将显示在这里。
+        </div>
+      </div>
     </div>
   </div>
 
@@ -198,7 +223,7 @@ function closeEditor() {
 }
 
 function showTab(name) {
-  var tabs = ['characters', 'settings', 'plugins'];
+  var tabs = ['characters', 'settings', 'tests', 'plugins'];
   for (var i = 0; i < tabs.length; i++) {
     document.getElementById('tab-' + tabs[i]).classList.add('hidden');
   }
@@ -210,6 +235,71 @@ function showTab(name) {
   links[tabs.indexOf(name)].classList.add('active');
 }
 
+function showResult(text) {
+  document.getElementById('test-result').textContent = text;
+}
+
+function loadChars() {
+  api('/api/chars', 'GET').then(function(d){
+    var sel = document.getElementById('test-char');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">-- 选择角色 --</option>' +
+      (d.chars||[]).map(function(c){ return '<option value="'+c.id+'">'+c.name+'</option>'; }).join('');
+  });
+}
+
+function testPrompt() {
+  var cid = document.getElementById('test-char').value;
+  var msg = document.getElementById('test-query').value || '你好';
+  api('/api/test/prompt', 'POST', {char_id: cid, message: msg}).then(function(r){
+    if (r.error) { showResult('错误: ' + r.error); return; }
+    showResult('提示词长度: ' + r.length + ' 字符\n角色: ' + r.char_name + '\n耗时: ' + r.time + '\n\n' + r.prompt);
+  });
+}
+
+function testRetriever() {
+  var cid = document.getElementById('test-char').value;
+  var query = document.getElementById('test-query').value || '你好';
+  if (!cid) { showResult('请先选择角色'); return; }
+  api('/api/test/retriever', 'POST', {char_id: cid, query: query}).then(function(r){
+    if (r.error) { showResult('错误: ' + r.error); return; }
+    var lines = (r.results||[]).map(function(v){ return '  [' + v.score + '] ' + v.line; }).join('\n');
+    showResult('匹配 ' + r.count + ' 条台词 (耗时 ' + r.time + '):\n' + lines);
+  });
+}
+
+function testSplit() {
+  var text = document.getElementById('test-query').value || '指挥官，早上好。[pause]今天有什么安排？';
+  api('/api/test/split', 'POST', {text: text}).then(function(r){
+    var parts = (r.parts||[]).map(function(p, i){ return '  [' + i + '] ' + p; }).join('\n');
+    showResult('拆分为 ' + r.count + ' 段 (耗时 ' + r.time + '):\n' + parts);
+  });
+}
+
+function testMemory() {
+  var text = document.getElementById('test-query').value || '你好\n<<MEMORY>>{"user_id":"test","observations":{"mood":"positive"}}<<END_MEMORY>>';
+  if (!text) text = '你好\n<<MEMORY>>{"user_id":"test","observations":{"mood":"positive"}}<<END_MEMORY>>';
+  api('/api/test/memory', 'POST', {text: text}).then(function(r){
+    showResult('有MEMORY: ' + r.has_memory + '  耗时: ' + r.time + '\n纯净文本: ' + r.clean_text + '\n\n解析结果:\n' + JSON.stringify(r.memory, null, 2));
+  });
+}
+
+function testScheduler() {
+  var text = document.getElementById('test-query').value || '明天早上8点';
+  api('/api/test/scheduler', 'POST', {text: text}).then(function(r){
+    showResult('输入: ' + text + '\n解析结果: ' + r.parsed + '\n耗时: ' + r.time);
+  });
+}
+
+function runTests() {
+  showResult('运行中...');
+  api('/api/test/run_all', 'POST', {}).then(function(r){
+    var detail = (r.details||[]).map(function(d){ return '  [失败] ' + d.test + ': ' + d.msg.slice(0,100); }).join('\n');
+    showResult('通过: ' + r.passed + '/' + r.total + '  失败: ' + r.failed + '  错误: ' + r.errors + '  耗时: ' + r.time + '\n\n' + (detail || '全部通过'));
+  });
+}
+
+loadChars();
 load();
 </script>
 </body>

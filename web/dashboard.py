@@ -92,7 +92,72 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
 
     def do_POST(self):
-        if self.path == "/api/memory/compress":
+        if self.path == "/api/chars":
+            from config import load_config
+            from core.character_manager import CharacterManager
+            cfg = load_config()
+            cm = CharacterManager(cfg.paths["characters_dir"])
+            self._send_json({"chars": cm.list_characters()})
+        elif self.path == "/api/test/prompt":
+            from config import load_config
+            from core.character_manager import CharacterManager
+            from core.prompt_builder import PromptBuilder
+            from core.models import UserProfile
+            body = self._read_body()
+            cfg = load_config()
+            cm = CharacterManager(cfg.paths["characters_dir"])
+            card = cm.get_character(body.get("char_id", ""))
+            if not card:
+                self._send_json({"error": "角色不存在"})
+                return
+            pb = PromptBuilder()
+            profile = UserProfile(user_id="debug")
+            cmem = profile.get_or_create_char_memory(card.name)
+            prompt = pb.build_system_prompt(character=card, user_id="debug", profile=profile, char_memory=cmem, user_message=body.get("message", ""))
+            self._send_json({"status": "ok", "prompt": prompt, "length": len(prompt), "char_name": card.name, "time": "0.1s"})
+        elif self.path == "/api/test/memory":
+            from core.memory_parser import extract_and_parse
+            body = self._read_body()
+            block, clean = extract_and_parse(body.get("text", ""))
+            self._send_json({"status": "ok", "clean_text": clean, "has_memory": block is not None, "memory": block.model_dump(exclude_none=True) if block else None, "time": "0.1s"})
+        elif self.path == "/api/test/split":
+            from bot.server_bot import QQBotServer
+            body = self._read_body()
+            parts = QQBotServer._split_message(body.get("text", ""))
+            self._send_json({"status": "ok", "parts": parts, "count": len(parts), "time": "0.1s"})
+        elif self.path == "/api/test/retriever":
+            from config import load_config
+            from core.character_manager import CharacterManager
+            from core.retriever import DialogueRetriever
+            body = self._read_body()
+            cfg = load_config()
+            cm = CharacterManager(cfg.paths["characters_dir"])
+            card = cm.get_character(body.get("char_id", ""))
+            if not card or not card.source_dialogues:
+                self._send_json({"error": "该角色没有台词库"})
+                return
+            retriever = DialogueRetriever()
+            results = retriever.retrieve(body.get("query", ""), card.source_dialogues, top_k=5)
+            self._send_json({"status": "ok", "results": [{"line": r[0], "score": round(r[1], 4)} for r in results], "count": len(results), "time": "0.1s"})
+        elif self.path == "/api/test/scheduler":
+            from core.scheduler import parse_reminder_time
+            body = self._read_body()
+            result = parse_reminder_time(body.get("text", ""))
+            self._send_json({"status": "ok" if result else "error", "parsed": result, "error": None if result else "无法解析", "time": "0.1s"})
+        elif self.path == "/api/test/run_all":
+            import unittest
+            from io import StringIO
+            loader = unittest.TestLoader()
+            suite = loader.discover(str(_project_root / "tests"), pattern="test_core.py", top_level_dir=str(_project_root))
+            result = unittest.TestResult()
+            suite.run(result)
+            details = []
+            for test, tb in result.failures:
+                details.append({"test": str(test), "status": "fail", "msg": str(tb)[:200]})
+            for test, tb in result.errors:
+                details.append({"test": str(test), "status": "error", "msg": str(tb)[:200]})
+            self._send_json({"status": "ok", "total": result.testsRun, "passed": result.testsRun - len(result.failures) - len(result.errors), "failed": len(result.failures), "errors": len(result.errors), "details": details, "time": "0.5s"})
+        elif self.path == "/api/memory/compress":
             from config import load_config
             from core.profile_manager import ProfileManager
             cfg = load_config()
