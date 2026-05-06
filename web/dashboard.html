@@ -252,9 +252,9 @@ function testPrompt() {
   var cid = document.getElementById('test-char').value;
   var msg = document.getElementById('test-query').value || '你好';
   api('/api/test/prompt', 'POST', {char_id: cid, message: msg}).then(function(r){
-    if (r.error) { showResult('错误: ' + r.error); return; }
-    showResult('提示词长度: ' + r.length + ' 字符\n角色: ' + r.char_name + '\n耗时: ' + r.time + '\n\n' + r.prompt);
-  });
+    if (r && r.error) { showResult('错误: ' + r.error); return; }
+    showResult('提示词长度: ' + (r.length||'?') + ' 字符\n角色: ' + (r.char_name||'') + '\n\n' + (r.prompt||''));
+  })['catch'](function(e){ showResult('请求失败: ' + e.message); });
 }
 
 function testRetriever() {
@@ -262,41 +262,40 @@ function testRetriever() {
   var query = document.getElementById('test-query').value || '你好';
   if (!cid) { showResult('请先选择角色'); return; }
   api('/api/test/retriever', 'POST', {char_id: cid, query: query}).then(function(r){
-    if (r.error) { showResult('错误: ' + r.error); return; }
+    if (r && r.error) { showResult('错误: ' + r.error); return; }
     var lines = (r.results||[]).map(function(v){ return '  [' + v.score + '] ' + v.line; }).join('\n');
-    showResult('匹配 ' + r.count + ' 条台词 (耗时 ' + r.time + '):\n' + lines);
-  });
+    showResult('匹配 ' + r.count + ' 条:\n' + lines);
+  })['catch'](function(e){ showResult('请求失败: ' + e.message); });
 }
 
 function testSplit() {
   var text = document.getElementById('test-query').value || '指挥官，早上好。[pause]今天有什么安排？';
   api('/api/test/split', 'POST', {text: text}).then(function(r){
     var parts = (r.parts||[]).map(function(p, i){ return '  [' + i + '] ' + p; }).join('\n');
-    showResult('拆分为 ' + r.count + ' 段 (耗时 ' + r.time + '):\n' + parts);
-  });
+    showResult('拆分为 ' + r.count + ' 段:\n' + parts);
+  })['catch'](function(e){ showResult('请求失败: ' + e.message); });
 }
 
 function testMemory() {
   var text = document.getElementById('test-query').value || '你好\n<<MEMORY>>{"user_id":"test","observations":{"mood":"positive"}}<<END_MEMORY>>';
-  if (!text) text = '你好\n<<MEMORY>>{"user_id":"test","observations":{"mood":"positive"}}<<END_MEMORY>>';
   api('/api/test/memory', 'POST', {text: text}).then(function(r){
-    showResult('有MEMORY: ' + r.has_memory + '  耗时: ' + r.time + '\n纯净文本: ' + r.clean_text + '\n\n解析结果:\n' + JSON.stringify(r.memory, null, 2));
-  });
+    showResult('有MEMORY: ' + r.has_memory + '\n纯净文本: ' + (r.clean_text||'') + '\n\n' + JSON.stringify(r.memory||{}, null, 2));
+  })['catch'](function(e){ showResult('请求失败: ' + e.message); });
 }
 
 function testScheduler() {
   var text = document.getElementById('test-query').value || '明天早上8点';
   api('/api/test/scheduler', 'POST', {text: text}).then(function(r){
-    showResult('输入: ' + text + '\n解析结果: ' + r.parsed + '\n耗时: ' + r.time);
-  });
+    showResult('输入: ' + text + '\n结果: ' + (r.parsed||'解析失败'));
+  })['catch'](function(e){ showResult('请求失败: ' + e.message); });
 }
 
 function runTests() {
   showResult('运行中...');
   api('/api/test/run_all', 'POST', {}).then(function(r){
-    var detail = (r.details||[]).map(function(d){ return '  [失败] ' + d.test + ': ' + d.msg.slice(0,100); }).join('\n');
-    showResult('通过: ' + r.passed + '/' + r.total + '  失败: ' + r.failed + '  错误: ' + r.errors + '  耗时: ' + r.time + '\n\n' + (detail || '全部通过'));
-  });
+    var d = (r.details||[]).map(function(x){ return '  [!] ' + x.test + ': ' + (x.msg||'').slice(0,100); }).join('\n');
+    showResult('通过: ' + r.passed + '/' + r.total + '  失败: ' + r.failed + '  耗时: ' + r.time + '\n\n' + (d || '全部通过'));
+  })['catch'](function(e){ showResult('请求失败: ' + e.message); });
 }
 
 loadChars();
