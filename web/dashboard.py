@@ -106,9 +106,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             cfg = load_config()
             cm = CharacterManager(cfg.paths["characters_dir"])
-            card = cm.get_character(body.get("char_id", ""))
+            card = None
+            cid = body.get("char_id", "")
+            for c in cm.list_characters():
+                if c["id"] == cid or c["name"] == cid:
+                    card = cm.get_character(c["id"])
+                    break
             if not card:
-                self._send_json({"error": "角色不存在"})
+                self._send_json({"error": "角色不存在: " + cid})
                 return
             pb = PromptBuilder()
             profile = UserProfile(user_id="debug")
@@ -132,7 +137,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             cfg = load_config()
             cm = CharacterManager(cfg.paths["characters_dir"])
-            card = cm.get_character(body.get("char_id", ""))
+            card = None
+            cid = body.get("char_id", "")
+            for c in cm.list_characters():
+                if c["id"] == cid or c["name"] == cid:
+                    card = cm.get_character(c["id"])
+                    break
             if not card or not card.source_dialogues:
                 self._send_json({"error": "该角色没有台词库"})
                 return
