@@ -79,7 +79,7 @@ body { font-family:-apple-system,'Segoe UI',sans-serif; background:#f5f5f5; colo
   </div>
 </div>
 
-<div id="editor-modal" class="modal hidden" onclick="closeEditor(event)">
+<div id="editor-modal" class="modal hidden" onclick="closeEditor()">
   <div class="modal-content" onclick="event.stopPropagation()">
     <h2 id="editor-title">编辑角色</h2>
     <div class="edit-form" id="editor-form"></div>
@@ -136,8 +136,9 @@ function renderList() {
   }).join('');
 }
 
-async function openEditor(id) {
+function openEditor(id) {
   var modal = document.getElementById('editor-modal');
+  if (!modal) return;
   modal.classList.remove('hidden');
   var title = document.getElementById('editor-title');
 
@@ -151,43 +152,49 @@ async function openEditor(id) {
     title.textContent = '添加角色';
   }
 
-  document.getElementById('editor-form').innerHTML =
+  var form = document.getElementById('editor-form');
+  if (!form) return;
+  form.innerHTML =
     '<label>角色名 <input id="f-name" value="' + (data.name||'') + '"></label>' +
     '<label>出处 <input id="f-source" value="' + (data.source||'') + '"></label>' +
     '<label>性格标签（逗号分隔） <input id="f-traits" value="' + ((data.personality&&data.personality.core_traits)||[]).join('、') + '"></label>' +
     '<label>说话风格 <textarea id="f-style">' + (data.personality&&data.personality.speaking_style||'') + '</textarea></label>' +
     '<label>世界观 <textarea id="f-worldview">' + ((data.knowledge_boundary&&data.knowledge_boundary.worldview)||'') + '</textarea></label>';
-  document._editId = id;
+  modal.setAttribute('data-edit-id', id || '');
 }
 
-async function saveChar() {
-  var id = document._editId;
+function saveChar() {
+  var id = document.getElementById('editor-modal').getAttribute('data-edit-id') || '';
+  var nameEl = document.getElementById('f-name');
+  if (!nameEl) { alert('表单未加载，请重新打开编辑窗口'); return; }
   var body = {
-    name: document.getElementById('f-name').value,
-    source: document.getElementById('f-source').value,
-    traits: document.getElementById('f-traits').value.split(/[,，、]/).map(function(s){return s.trim();}).filter(function(s){return s;}),
-    speaking_style: document.getElementById('f-style').value,
-    worldview: document.getElementById('f-worldview').value,
+    name: nameEl.value,
+    source: (document.getElementById('f-source')||{}).value || '',
+    traits: ((document.getElementById('f-traits')||{}).value||'').split(/[,，、]/).map(function(s){return s.trim();}).filter(Boolean),
+    speaking_style: (document.getElementById('f-style')||{}).value || '',
+    worldview: (document.getElementById('f-worldview')||{}).value || '',
   };
   if (!body.name) { alert('角色名不能为空'); return; }
-  await api(id ? '/api/characters/'+id : '/api/characters', 'POST', body);
-  closeEditor();
-  load();
+  api(id ? '/api/characters/'+id : '/api/characters', 'POST', body).then(function(){
+    closeEditor();
+    load();
+  });
 }
 
-async function delChar(id) {
+function delChar(id) {
   if (!confirm('确认删除此角色？')) return;
-  await api('/api/characters/'+id, 'DELETE');
-  load();
+  api('/api/characters/'+id, 'DELETE').then(function(){ load(); });
 }
 
-async function compressMem() {
-  var r = await api('/api/memory/compress', 'POST', {});
-  document.getElementById('compress-result').textContent = r.msg || '完成';
+function compressMem() {
+  api('/api/memory/compress', 'POST', {}).then(function(r){
+    document.getElementById('compress-result').textContent = r.msg || '完成';
+  });
 }
 
-function closeEditor(e) {
-  document.getElementById('editor-modal').classList.add('hidden');
+function closeEditor() {
+  var el = document.getElementById('editor-modal');
+  if (el) el.classList.add('hidden');
 }
 
 function showTab(name) {
