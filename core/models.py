@@ -208,6 +208,43 @@ class PerCharacterMemory(BaseModel):
     last_tonal_suggestion: str = ""
     # 最后活动时间（用于主动对话检测）
     last_message_at: str = ""
+    # 遗忘追踪：标签最后出现时间
+    trait_last_seen: Dict[str, str] = Field(default_factory=dict)  # trait -> timestamp
+
+    def compress(self, max_age_days: int = 30) -> bool:
+        """压缩记忆：移除过时的特征标签，返回 True 表示有改动"""
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        cutoff = now - timedelta(days=max_age_days)
+        changed = False
+
+        # 过滤过时的性格标签
+        kept_traits = []
+        for t in self.observed_traits:
+            last = self.trait_last_seen.get(t)
+            if last:
+                try:
+                    if datetime.fromisoformat(last) < cutoff:
+                        continue
+                except Exception:
+                    pass
+            kept_traits.append(t)
+        if len(kept_traits) != len(self.observed_traits):
+            self.observed_traits = kept_traits
+            changed = True
+
+        # 限制情绪历史长度
+        if len(self.emotional_history) > 50:
+            self.emotional_history = self.emotional_history[-30:]
+            changed = True
+
+        return changed
+
+    def mark_trait_seen(self, trait: str):
+        """更新特征标签的最后出现时间"""
+        from datetime import datetime
+        self.trait_last_seen[trait] = datetime.now().isoformat()
+    last_message_at: str = ""
 
 
 class UserProfile(BaseModel):

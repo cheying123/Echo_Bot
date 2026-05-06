@@ -91,16 +91,16 @@ class ProfileManager:
         profile = self.get_or_create_profile(user_id)
         char_memory = profile.get_or_create_char_memory(character_id)
 
-        # 1) 合并性格特征（去重+过滤）
+        # 1) 合并性格特征（去重+过滤+时间戳）
         import re
         for trait in memory.observations.new_traits:
             if not trait:
                 continue
-            # 过滤：太长的句子、含标点的、明显不是性格标签的
             if len(trait) > 15 or re.search(r'[，。！？、]', trait):
                 continue
             if trait not in char_memory.observed_traits:
                 char_memory.observed_traits.append(trait)
+            char_memory.mark_trait_seen(trait)
 
         # 2) 合并兴趣（去重）
         for interest in memory.observations.interests_mentioned:
@@ -290,6 +290,31 @@ class ProfileManager:
                 conn.commit()
             finally:
                 conn.close()
+
+    # ---- 记忆压缩 ----
+
+    def compress_all_memories(self, max_age_days: int = 30) -> int:
+        """压缩所有用户的所有角色记忆，返回处理的用户数"""
+        conn = self._get_conn()
+        count = 0
+        try:
+            rows = conn.execute("SELECT user_id, profile_json FROM user_profiles").fetchall()
+            for row in rows:
+                try:
+                    profile = UserProfile(**json.loads(row[1]))
+                    changed = False
+                    for cm in profile.per_character_memory.values():
+                        if cm.compress(max_age_days=max_age_days):
+                            changed = True
+                    if changed:
+                        self.save_profile(profile)
+                    count += 1
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+        logger.info("记忆压缩完成: %d 个用户", count)
+        return count
 
     # ---- 管理员系统 ----
 

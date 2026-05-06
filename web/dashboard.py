@@ -204,6 +204,14 @@ function showTab(name) {
   document.querySelectorAll('.nav a')[['characters','settings','plugins'].indexOf(name)].classList.add('active');
 }
 
+async function compressMem() {
+  const btn = event.target; btn.disabled = true;
+  try {
+    const r = await api('/api/memory/compress', 'POST');
+    document.getElementById('compress-result').textContent = r.msg || '完成';
+  } finally { btn.disabled = false; }
+}
+
 load();
 </script>
 </body>
@@ -285,7 +293,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
 
     def do_POST(self):
-        if self.path == "/api/characters":
+        if self.path == "/api/memory/compress":
+            from config import load_config
+            from core.profile_manager import ProfileManager
+            cfg = load_config()
+            pm = ProfileManager(cfg.paths["db_path"])
+            count = pm.compress_all_memories()
+            self._send_json({"ok": True, "processed": count, "msg": f"已压缩 {count} 个用户的记忆"})
+        elif self.path == "/api/characters":
             data = self._read_body()
             name = data.get("name", "").strip()
             if not name:
