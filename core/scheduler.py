@@ -7,7 +7,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# 北京时间 (UTC+8)
+_CST = timezone(timedelta(hours=8))
+
+def _now_cst() -> datetime:
+    """返回当前北京时间"""
+    return datetime.now(_CST)
 from typing import Any, Callable, Optional
 
 import httpx
@@ -49,14 +56,13 @@ class Scheduler:
 
     async def _weather_loop(self):
         """按用户设定的时间推送天气预报（每 30 分钟检查一次）"""
-        # 记录今天已发送的用户，避免重复
         sent_today: set[str] = set()
-        last_check_day = datetime.now().day
+        last_check_day = _now_cst().day
 
         await asyncio.sleep(60)
 
         while self._running:
-            now = datetime.now()
+            now = _now_cst()
 
             # 新的一天，重置记录
             if now.day != last_check_day:
@@ -144,7 +150,7 @@ def parse_reminder_time(text: str) -> Optional[str]:
       "明天早上8点"  "今天下午3点"  "后天"  "5分钟后"
       "2026-05-05 08:00"  "8点"  "明天"
     """
-    now = datetime.now()
+    now = _now_cst()
     text = text.strip()
 
     # ISO 格式直接解析
@@ -157,7 +163,7 @@ def parse_reminder_time(text: str) -> Optional[str]:
     # 匹配 "N分钟后"
     m = re.match(r'^(\d+)分钟后$', text)
     if m:
-        return (now + timedelta(minutes=int(m.group(1)))).isoformat()
+        return (_now_cst() + timedelta(minutes=int(m.group(1)))).isoformat()
 
     # 匹配 "明天" / "后天"
     days = 0

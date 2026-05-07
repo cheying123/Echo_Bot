@@ -471,14 +471,20 @@ class ProfileManager:
             finally:
                 conn.close()
 
-    def get_due_reminders(self) -> list[dict]:
+    def get_due_reminders(self, now: str = "") -> list[dict]:
         """获取到期的提醒"""
+        if not now:
+            try:
+                from core.scheduler import _now_cst
+                now = _now_cst().isoformat()
+            except Exception:
+                now = datetime.now().isoformat()
         conn = self._get_conn()
         try:
             rows = conn.execute(
                 """SELECT id, user_id, message FROM reminders
                    WHERE done = 0 AND remind_at <= ?""",
-                (datetime.now().isoformat(),),
+                (now,),
             ).fetchall()
             return [{"id": r[0], "user_id": r[1], "message": r[2]} for r in rows]
         finally:

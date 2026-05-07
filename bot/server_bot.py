@@ -123,6 +123,18 @@ class QQBotServer:
         logger.info("go-cqhttp 已连接: %s", peer)
         self._ws = ws
 
+        # 上线通知：给所有管理员发消息
+        try:
+            admins = self.engine.profile_mgr.list_admins()
+            for admin_id in admins[:3]:
+                action = {
+                    "action": "send_msg",
+                    "params": {"message_type": "private", "user_id": int(admin_id), "message": "Echo_Bot 已重新上线。"},
+                }
+                await ws.send(json.dumps(action))
+        except Exception:
+            pass
+
         try:
             async for raw_message in ws:
                 try:
@@ -259,6 +271,11 @@ class QQBotServer:
                 import time as _time2
                 if msg_type == "group":
                     self._group_engaged[bind_key] = _time2.time()
+                    # 后端过滤：去掉所有动作/语气描写
+                    import re as _re
+                    reply = _re.sub(r'[（(][^）)]*[）)]', '', reply)
+                    reply = _re.sub(r'\*[^*]*\*', '', reply)
+                    reply = reply.strip()
                 reply = await self._attach_sticker(reply, character_id)
                 reply = await self.plugin_mgr.dispatch_message(event, reply)
                 if reply:
