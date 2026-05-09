@@ -89,27 +89,37 @@ def parse_memory_json(json_str: str) -> Optional[MemoryBlock]:
             return None
 
     try:
-        # 构建 MemoryBlock
+        # 兼容两种格式：嵌套版（旧）和扁平版（简化新格式）
         obs_data = data.get("observations", {}) or {}
         rel_data = data.get("relationship", {}) or {}
         strat_data = data.get("strategy_adjustments", {}) or {}
+
+        # 扁平版：字段直接在顶层
+        mood = str(data.get("mood", obs_data.get("mood", "neutral")))
+        new_traits = data.get("new_traits", obs_data.get("new_traits", []))
+        interests = data.get("interests", data.get("interests_mentioned", obs_data.get("interests_mentioned", [])))
+        trust_sig = str(data.get("trust", rel_data.get("trust_signal", "维持")))
+        aff_sig = str(data.get("affection", rel_data.get("affection_signal", "维持")))
+        next_tone = str(data.get("tone", strat_data.get("next_tone", "")))
+
+        if isinstance(new_traits, str):
+            new_traits = [new_traits]
+        if isinstance(interests, str):
+            interests = [interests]
 
         block = MemoryBlock(
             user_id=str(data.get("user_id", "")),
             timestamp=str(data.get("timestamp", "")),
             observations=MemoryObservation(
-                new_traits=obs_data.get("new_traits", []),
-                mood=str(obs_data.get("mood", "neutral")),
-                interests_mentioned=obs_data.get("interests_mentioned", []),
+                new_traits=new_traits,
+                mood=mood,
+                interests_mentioned=interests,
                 speech_pattern=_normalize_str_field(obs_data, "speech_pattern"),
             ),
             relationship=RelationshipState(
                 current_stage=str(rel_data.get("current_stage", "陌生人")),
-                stage_reason=str(rel_data.get("stage_reason", "")),
-                trust_signal=str(rel_data.get("trust_signal", "维持")),
-                trust_reason=str(rel_data.get("trust_reason", "")),
-                affection_signal=str(rel_data.get("affection_signal", "维持")),
-                affection_reason=str(rel_data.get("affection_reason", "")),
+                trust_signal=trust_sig,
+                affection_signal=aff_sig,
             ),
             strategy_adjustments=StrategyAdjustment(
                 next_tone=str(strat_data.get("next_tone", "")),

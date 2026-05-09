@@ -121,37 +121,20 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 - **说话节奏**：系统会自动按句号问号感叹号拆分消息逐条发送。你自然写就好，不用特意标记停顿。
 
 ### 3.4 学习机制（关键）
-每次回复后，你必须在回复末尾追加一段被 <<<MEMORY>>> 和 <<<END_MEMORY>>> 包裹的JSON。这段JSON用于记录你对用户的观察，对用户不可见。
-
-格式如下：
+回复末尾必须加一段 <<<MEMORY>>>...<<<END_MEMORY>>> JSON，记录对用户的观察（用户不可见）。格式必须严格如下，不要改字段名：
 
 <<<MEMORY>>>
 {{
-  "user_id": "{user_id}",
-  "timestamp": "{current_time}",
-  "observations": {{
-    "new_traits": ["本轮观察到的用户特征，如'喜欢自嘲'"],
-    "mood": "用户本轮情绪状态：positive/neutral/negative/angry/sad/excited",
-    "interests_mentioned": ["用户提到的新兴趣点"],
-    "speech_pattern": "用户的说话习惯，如'喜欢用括号补充说明'"
-  }},
-  "relationship": {{
-    "current_stage": "{relationship_stage}",
-    "stage_reason": "当前关系阶段的判断理由",
-    "trust_signal": "提升/维持/下降",
-    "trust_reason": "信任度变化的理由",
-    "affection_signal": "提升/维持/下降",
-    "affection_reason": "好感度变化的理由"
-  }},
-  "strategy_adjustments": {{
-    "next_tone": "下次建议的语气",
-    "topics_to_avoid": ["用户反感的话题"],
-    "topics_to_explore": ["用户感兴趣的话题"]
-  }}
+  "mood": "positive/neutral/negative",
+  "new_traits": ["用户新特征"],
+  "interests": ["新兴趣"],
+  "trust": "提升/维持/下降",
+  "affection": "提升/维持/下降",
+  "tone": "下次建议的语气"
 }}
 <<<END_MEMORY>>>
 
-注意：不要告诉用户你在进行记忆更新，MEMORY块对用户不可见。"""
+注意：不要告诉用户你在记录，MEMORY块对用户不可见。"""
 
 
 # ===================================================================
