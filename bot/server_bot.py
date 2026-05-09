@@ -403,15 +403,85 @@ class QQBotServer:
 
     @staticmethod
     def _detect_mood(message: str) -> str:
-        """从文本中检测情绪（轻量关键词版）"""
-        if any(w in message for w in ["😂", "🤣", "笑死", "太棒", "开心", "高兴", "哈哈", "嘻嘻", "好爽", "绝了", "爱了"]):
-            return "positive"
-        if any(w in message for w in ["😭", "😢", "难过", "伤心", "想哭", "失落", "低落"]):
-            return "sad"
-        if any(w in message for w in ["😡", "🤬", "气死", "烦死", "无语", "火大", "忍不"]):
+        """从文本中检测情绪（分层关键词 + 强度判断）"""
+        import re
+        msg = message.strip()
+        if not msg:
+            return "neutral"
+
+        # === 高强度情绪（命中即确认）===
+        # 强烈正面
+        if any(w in msg for w in ["笑死了", "笑死我了", "太开心了", "太高兴了", "太棒了", "绝了", "无敌了", "超级", "牛逼", "完美"]):
+            return "excited"
+        # 强烈负面
+        if any(w in msg for w in ["气死了", "气死我了", "崩溃", "受不了", "忍不了", "烦死了", "不想活了"]):
             return "angry"
-        if any(w in message for w in ["累", "压力", "烦躁", "焦虑", "好烦", "难受", "唉"]):
-            return "negative"
+        # 强烈悲伤
+        if any(w in msg for w in ["哭死", "哭死了", "好难过", "好伤心", "心累了", "想哭"]):
+            return "sad"
+
+        # === 中强度情绪（需要多个信号）===
+        positive_signals = 0
+        negative_signals = 0
+        sad_signals = 0
+        angry_signals = 0
+
+        # 表情符号
+        if re.search(r'[😂🤣😆😁🙌🎉🔥💯]', msg):
+            positive_signals += 2
+        if re.search(r'[😭😢😥😰😱🥺💔]', msg):
+            sad_signals += 2
+        if re.search(r'[😡🤬👿💢🗯️]', msg):
+            angry_signals += 2
+        if re.search(r'[😅😒😮‍💨💤🥱😩]', msg):
+            negative_signals += 1
+
+        # 正面关键词
+        pos_words = ["哈哈", "嘻嘻", "不错", "可以", "好的", "好呀", "开心", "高兴", "喜欢", "爱了", "好爽", "爽", "牛", "强", "可以啊", "真不错", "挺好的", "满意"]
+        for w in pos_words:
+            if w in msg:
+                positive_signals += 1
+                break
+
+        # 负面关键词
+        neg_words = ["累", "压力", "烦", "焦虑", "难受", "唉", "算了", "随便吧", "没劲", "无聊", "没意思", "好烦", "烦躁", "疲惫"]
+        for w in neg_words:
+            if w in msg:
+                negative_signals += 1
+                break
+
+        # 愤怒关键词
+        angry_words = ["无语", "火大", "生气", "可恶", "呸", "切", "什么人啊", "有毛病", "有病"]
+        for w in angry_words:
+            if w in msg:
+                angry_signals += 1
+                break
+
+        # 悲伤关键词
+        sad_words = ["难过", "伤心", "低落", "失落", "失望", "孤独", "寂寞", "想家"]
+        for w in sad_words:
+            if w in msg:
+                sad_signals += 1
+                break
+
+        # 问号检测（连续问号表示困惑/不耐烦）
+        if "？？" in msg or "??" in msg:
+            negative_signals += 1
+
+        # === 投票决定最终情绪 ===
+        scores = {
+            "positive": positive_signals,
+            "negative": negative_signals,
+            "sad": sad_signals,
+            "angry": angry_signals,
+        }
+        # 最高分情绪，且至少 2 分
+        best = max(scores, key=scores.get)
+        if scores[best] >= 2:
+            return best
+        # 1 分的情况
+        if scores[best] == 1:
+            return best if best == "positive" else "negative"
         return "neutral"
 
     @staticmethod

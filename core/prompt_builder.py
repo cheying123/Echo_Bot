@@ -208,7 +208,7 @@ class PromptBuilder:
         lore_text = ""
         if character.lore:
             lines = [f"  · {item}" for item in character.lore]
-            lore_text = "\n【关键设定（必须遵守的事实）】\n" + "\n".join(lines)
+            lore_text = "\n【关键设定（回复前必须对照检查）】\n" + "\n".join(lines) + "\n【规则】回复前先对照上述设定，确保你提到的内容与角色设定一致。不确定时宁可不提，也不要编造。"
 
         # 对话示例
         examples_text = self._format_examples(character.speech_examples)
