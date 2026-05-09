@@ -351,6 +351,10 @@ class PromptBuilder:
 
         parts = []
 
+        # 兼容性评分
+        if char_memory.compatibility_score:
+            parts.append(f"兼容性: {char_memory.compatibility_score:.2f}")
+
         # 性格标签
         traits = char_memory.observed_traits
         if traits:

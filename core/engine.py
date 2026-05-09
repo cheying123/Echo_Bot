@@ -126,9 +126,10 @@ class DialogueEngine:
         # 2) 记录用户消息到短期上下文
         self.context_mgr.add_user_message(user_id, character_id, user_message)
 
-        # 3) 构建系统提示词（含台词检索 + 行为模式调整）
+        # 3) 构建系统提示词（含台词检索 + 行为模式 + 兼容性调整）
+        adjusted_char = self._adjust_character_by_compatibility(character, char_memory)
         system_prompt = self.prompt_builder.build_system_prompt(
-            character=character,
+            character=adjusted_char,
             user_id=user_id,
             profile=profile,
             char_memory=char_memory,
@@ -376,6 +377,34 @@ class DialogueEngine:
             mood_score = 0.15
 
         return min(1.0, trait_match * 0.5 + mood_score + interest_bonus)
+
+    @staticmethod
+    def _adjust_character_by_compatibility(character: CharacterCard, char_memory: PerCharacterMemory) -> CharacterCard:
+        """根据兼容性评分调整角色行为"""
+        score = getattr(char_memory, "compatibility_score", 0.5) or 0.5
+        stage = char_memory.relationship_stage
+        bp = char_memory.behavioral_patterns or {}
+
+        import copy
+        adj = copy.deepcopy(character)
+
+        # 兼容性高 + 关系深：说话更随意亲近
+        if score >= 0.7 and stage in ("亲密", "挚友"):
+            adj.personality.speaking_style += "，语气可以更随意亲近"
+        # 兼容性中等 + 熟悉：可以开放交流
+        elif score >= 0.5 and stage in ("熟悉", "亲密", "挚友"):
+            adj.personality.speaking_style += "，可以开放交流"
+        # 兼容性低：保持礼貌距离
+        elif score < 0.4:
+            adj.personality.speaking_style += "，保持礼貌和距离"
+
+        # 用户偏好调整
+        if bp.get("question_rate", 0) > 0.5:
+            adj.personality.speaking_style += "，多回应用户的问题"
+        if bp.get("emoji_rate", 0) > 0.3:
+            adj.personality.speaking_style += "，可以适当使用表情语气"
+
+        return adj
 
     # ---- 异步辅助（不阻塞主回复流程） ----
 

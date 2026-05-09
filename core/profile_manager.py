@@ -145,6 +145,9 @@ class ProfileManager:
                 f"用户说话: {memory.observations.speech_pattern}"
             )
 
+        # 7) 更新行为模式
+        self._update_behavioral_patterns(char_memory, "", "")
+
         self.save_profile(profile)
         return profile
 
@@ -571,10 +574,11 @@ class ProfileManager:
         conv = char_memory.conversation_count
         pr = self._analyze_emotion_trend(char_memory.emotional_history)
         quality = self._calc_interaction_quality(char_memory)
+        compat = getattr(char_memory, "compatibility_score", 0.5) or 0.5
         intimacy = min(5, len(char_memory.shared_history) + len(char_memory.observed_interests) // 3)
 
-        trust = min(10, 1 + conv // 15 + intimacy + int(pr * 2))
-        affection = min(10, 1 + conv // 12 + int(quality * 3))
+        trust = min(10, 1 + conv // 15 + intimacy + int(pr * 2) + int(compat * 2))
+        affection = min(10, 1 + conv // 12 + int(quality * 3) + int(compat * 2))
 
         for sig, attr in [("trust_signal", "trust_level"), ("affection_signal", "affection_level")]:
             val = getattr(memory.relationship, sig, "")
@@ -588,7 +592,7 @@ class ProfileManager:
         char_memory.trust_level = trust
         char_memory.affection_level = affection
 
-        progress = self._eval_progress(char_memory.relationship_stage, conv, trust, affection, pr, intimacy)
+        progress = self._eval_progress(char_memory.relationship_stage, conv, trust, affection, pr, intimacy, compat)
         if progress["promote"]:
             from core.models import promote_stage, RelationshipStage
             char_memory.relationship_stage = promote_stage(RelationshipStage(char_memory.relationship_stage), 1).value
@@ -597,6 +601,60 @@ class ProfileManager:
             char_memory.relationship_stage = demote_stage(RelationshipStage(char_memory.relationship_stage), 1).value
 
     @staticmethod
+    def _analyze_emotion_trend(history: list) -> float:
+        recent = [e for e in history[-12:] if e.get("mood")]
+        return sum(1 for e in recent if e["mood"] in ("positive", "excited")) / max(len(recent), 1)
+
+    @staticmethod
+    def _calc_interaction_quality(m) -> float:
+        return (min(1, len(m.observed_interests) / 10) + min(1, m.conversation_count / 50)) / 2
+
+    @staticmethod
+    def _eval_progress(stage: str, conv: int, trust: int, affection: int, pr: float, intimacy: int, compat: float = 0.5) -> dict:
+        from core.models import RelationshipStage
+        try:
+            s = RelationshipStage(stage)
+        except ValueError:
+            return {"promote": False, "demote": False}
+        r = {"promote": False, "demote": False}
+        mult = 1.0 if compat >= 0.7 else 0.8 if compat >= 0.5 else 0.6
+        rules = [(0, 5, 0, 0.0), (1, 20, 3, 0.6), (2, 50, 6, 0.6), (3, 100, 8, 0.5)]
+        if s.value < len(rules):
+            bc, bt, bp = rules[s.value][1], rules[s.value][2], rules[s.value][3]
+            if conv >= int(bc * mult) and trust >= int(bt * mult) and pr >= bp * mult:
+                r["promote"] = True
+        if pr < 0.2 and s.value > 0:
+            r["demote"] = True
+        return r
+
+    @staticmethod
+    def _update_behavioral_patterns(memory: PerCharacterMemory, user_msg: str, bot_resp: str):
+        bp = memory.behavioral_patterns or {}
+        import re
+        lengths = bp.get("_lengths", [])
+        lengths.append(len(user_msg))
+        if len(lengths) > 50: lengths = lengths[-50:]
+        bp["avg_msg_len"] = sum(lengths) / len(lengths)
+        bp["_lengths"] = lengths
+
+        qs = len(re.findall(r"[？?]", user_msg))
+        ts = max(1, len(re.split(r"[。！？.!?]", user_msg)))
+        rates = bp.get("_qrates", [])
+        rates.append(qs / ts)
+        if len(rates) > 20: rates = rates[-20:]
+        bp["question_rate"] = sum(rates) / len(rates)
+        bp["_qrates"] = rates
+
+        emo = len(re.findall(r"[^\w\s，。、《》？；：""''（）【】]", user_msg))
+        erates = bp.get("_erates", [])
+        erates.append(emo / max(len(user_msg), 1))
+        if len(erates) > 20: erates = erates[-20:]
+        bp["emoji_rate"] = sum(erates) / len(erates)
+        bp["_erates"] = erates
+
+        bp["reply_style"] = "简短" if bp["avg_msg_len"] < 10 else "详细" if bp["avg_msg_len"] > 30 else "中等"
+        memory.behavioral_patterns = bp
+
     def _analyze_emotion_trend(history: list) -> float:
         recent = [e for e in history[-12:] if e.get("mood")]
         return sum(1 for e in recent if e["mood"] in ("positive", "excited")) / max(len(recent), 1)
