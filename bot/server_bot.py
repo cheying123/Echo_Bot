@@ -329,27 +329,33 @@ class QQBotServer:
         for e in endings:
             style["endings"][e] = style["endings"].get(e, 0) + 1
 
-    def _save_user_traits(self, user_id: str, message: str):
+    def _save_user_traits(self, user_id: str, message: str, char_id: str = ""):
         """每消息轻量分析：情绪+性格+兴趣，不回复也记录"""
         import re
         try:
             profile = self.engine.profile_mgr.get_or_create_profile(f"user_{user_id}")
-            all_chars = self.engine.char_mgr.list_characters()
+            # 也保存到 bare user_id 下（/状态 优先读这里）
+            bare_profile = self.engine.profile_mgr.get_or_create_profile(user_id)
 
             # ---- 情绪检测 ----
             mood = self._detect_mood(message)
 
-            for c in all_chars:
-                cm = profile.get_or_create_char_memory(c["id"])
+            # 只处理当前绑定的角色（优先用传进来的 char_id）
+            target_id = char_id
+            if not target_id:
+                for c in self.engine.char_mgr.list_characters():
+                    target_id = c["id"]
+                    break
+
+            for profile_target in [profile, bare_profile]:
+                cm = profile_target.get_or_create_char_memory(target_id)
                 cm.conversation_count += 1
 
-                # 记录情绪（包括 neutral，确保 /状态 能显示）
                 if mood:
                     cm.emotional_history.append({"mood": mood, "timestamp": datetime.now().isoformat()})
                     if len(cm.emotional_history) > 50:
                         cm.emotional_history = cm.emotional_history[-30:]
 
-                # ---- 信任/关系更新（不依赖 AI MEMORY 块）----
                 conv = cm.conversation_count
                 if conv >= 5 and cm.relationship_stage == "陌生人":
                     cm.relationship_stage = "初识"
@@ -357,7 +363,6 @@ class QQBotServer:
                     cm.relationship_stage = "熟悉"
                 if conv >= 50 and cm.trust_level >= 4 and cm.relationship_stage == "熟悉":
                     cm.relationship_stage = "亲密"
-                # 信任度按轮数自动增长
                 auto_trust = min(10, 1 + conv // 15)
                 if auto_trust > cm.trust_level:
                     cm.trust_level = auto_trust
@@ -365,15 +370,12 @@ class QQBotServer:
                 if auto_affection > cm.affection_level:
                     cm.affection_level = auto_affection
 
-                # ---- 性格特征检测 ----
                 trait = self._detect_trait(message)
                 if trait and trait not in cm.observed_traits:
                     cm.observed_traits.append(trait)
 
-                # ---- 兴趣关键词提取 ----
                 interest_keywords = ["喜欢", "想学", "想玩", "最近在看", "推荐", "好玩", "好看"]
                 for kw in interest_keywords:
-                    if kw in message:
                         # 取关键词后面的内容
                         idx = message.find(kw) + len(kw)
                         topic = message[idx:idx+15].strip().rstrip("，。！？的了")

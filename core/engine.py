@@ -187,17 +187,17 @@ class DialogueEngine:
         self.total_time += elapsed
         if (char_memory.conversation_count + 1) % max(1, self.cfg.memory.get("memory_extraction_interval", 3)) == 0:
             asyncio.ensure_future(self._async_extract_memory(
-                user_id, character_id, user_message, clean_reply, system_prompt,
+                user_id, character_id, user_message, raw_response, system_prompt,
             ))
 
         # 8) 记录 AI 回复到上下文
         self.context_mgr.add_assistant_message(
-            user_id, character_id, clean_reply, memory_block,
+            user_id, character_id, raw_response, None,
         )
 
         # 9) 增加对话计数 + 日志（异步，不阻塞）
         asyncio.ensure_future(self._async_log_conversation(
-            user_id, character_id, user_message, clean_reply, memory_block
+            user_id, character_id, user_message, raw_response, None
         ))
 
         # 10) 检查是否需要生成中期摘要
@@ -209,7 +209,7 @@ class DialogueEngine:
                 self._generate_summary(user_id, character_id, profile)
             )
 
-        return clean_reply, memory_block.model_dump() if memory_block else None
+        return raw_response, None
 
     async def process_message_stream(
         self,
@@ -260,7 +260,7 @@ class DialogueEngine:
                 self.profile_mgr.merge_memory_block(user_id, character_id, memory_block)
 
         self.context_mgr.add_assistant_message(
-            user_id, character_id, clean_reply, memory_block,
+            user_id, character_id, raw_response, None,
         )
         self.profile_mgr.increment_conversation_count(user_id, character_id)
         self.total_calls += 1
