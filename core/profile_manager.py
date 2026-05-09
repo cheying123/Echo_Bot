@@ -568,79 +568,57 @@ class ProfileManager:
     # ---- 内部方法 ----
 
     def _update_relationship(self, char_memory: PerCharacterMemory, memory: MemoryBlock):
-        """根据对话轮数 + 情绪趋势 + 互动深度更新关系"""
-        current = char_memory.relationship_stage
         conv = char_memory.conversation_count
+        pr = self._analyze_emotion_trend(char_memory.emotional_history)
+        quality = self._calc_interaction_quality(char_memory)
+        intimacy = min(5, len(char_memory.shared_history) + len(char_memory.observed_interests) // 3)
 
-        # 情绪趋势分析（最近 10 条情绪中正面比例）
-        positive_ratio = 0.5
-        recent = [e for e in char_memory.emotional_history[-10:] if e.get("mood")]
-        if recent:
-            positive_count = sum(1 for e in recent if e["mood"] in ("positive", "excited"))
-            positive_ratio = positive_count / len(recent)
+        trust = min(10, 1 + conv // 15 + intimacy + int(pr * 2))
+        affection = min(10, 1 + conv // 12 + int(quality * 3))
 
-        # 互动深度（有共同经历/兴趣记录加分）
-        depth_bonus = min(3, len(char_memory.observed_interests) // 3)
-        depth_bonus += min(2, len(char_memory.shared_history))
+        for sig, attr in [("trust_signal", "trust_level"), ("affection_signal", "affection_level")]:
+            val = getattr(memory.relationship, sig, "")
+            if val == "提升":
+                if attr == "trust_level": trust = min(10, trust + 1)
+                else: affection = min(10, affection + 1)
+            elif val == "下降":
+                if attr == "trust_level": trust = max(1, trust - 1)
+                else: affection = max(1, affection - 1)
 
-        # 信任/好感 = 基础轮数 + 情绪加分 + 深度加分
-        auto_trust = min(10, 1 + conv // 12 + depth_bonus)
-        auto_affection = min(10, 1 + conv // 10 + int(positive_ratio * 2))
-        if auto_trust > char_memory.trust_level:
-            char_memory.trust_level = auto_trust
-        if auto_affection > char_memory.affection_level:
-            char_memory.affection_level = auto_affection
+        char_memory.trust_level = trust
+        char_memory.affection_level = affection
 
-        # AI 信号额外调整
-        if memory.relationship.trust_signal == "提升":
-            char_memory.trust_level = min(10, char_memory.trust_level + 1)
-        elif memory.relationship.trust_signal == "下降":
-            char_memory.trust_level = max(1, char_memory.trust_level - 1)
-        if memory.relationship.affection_signal == "提升":
-            char_memory.affection_level = min(10, char_memory.affection_level + 1)
-        elif memory.relationship.affection_signal == "下降":
-            char_memory.affection_level = max(1, char_memory.affection_level - 1)
+        progress = self._eval_progress(char_memory.relationship_stage, conv, trust, affection, pr, intimacy)
+        if progress["promote"]:
+            from core.models import promote_stage, RelationshipStage
+            char_memory.relationship_stage = promote_stage(RelationshipStage(char_memory.relationship_stage), 1).value
+        elif progress["demote"]:
+            from core.models import demote_stage, RelationshipStage
+            char_memory.relationship_stage = demote_stage(RelationshipStage(char_memory.relationship_stage), 1).value
 
-        # 关系阶段晋升
+    @staticmethod
+    def _analyze_emotion_trend(history: list) -> float:
+        recent = [e for e in history[-12:] if e.get("mood")]
+        return sum(1 for e in recent if e["mood"] in ("positive", "excited")) / max(len(recent), 1)
+
+    @staticmethod
+    def _calc_interaction_quality(m) -> float:
+        return (min(1, len(m.observed_interests) / 10) + min(1, m.conversation_count / 50)) / 2
+
+    @staticmethod
+    def _eval_progress(stage: str, conv: int, trust: int, affection: int, pr: float, intimacy: int) -> dict:
+        from core.models import RelationshipStage
         try:
-            current_stage = RelationshipStage(current)
+            s = RelationshipStage(stage)
         except ValueError:
-            current_stage = RelationshipStage.STRANGER
+            return {"promote": False, "demote": False}
+        r = {"promote": False, "demote": False}
+        rules = [(0, 5, 0, 0.0), (1, 20, 3, 0.6), (2, 50, 6, 0.6), (3, 100, 8, 0.5)]
+        if s.value < len(rules):
+            mc, mt, mp = rules[s.value][1], rules[s.value][2], rules[s.value][3]
+            if conv >= mc and trust >= mt and pr >= mp:
+                r["promote"] = True
+        if pr < 0.2 and s.value > 0:
+            r["demote"] = True
+        return r
 
-        new_stage = current_stage
-
-        tl = char_memory.trust_level
-        al = char_memory.affection_level
-        if current_stage == RelationshipStage.STRANGER and conv >= 5:
-            new_stage = RelationshipStage.ACQUAINTED
-        elif (
-            current_stage == RelationshipStage.ACQUAINTED
-            and conv >= 20
-            and tl >= 3
-        ):
-            new_stage = RelationshipStage.FAMILIAR
-        elif (
-            current_stage == RelationshipStage.FAMILIAR
-            and conv >= 50
-            and tl >= 6
-            and al >= 5
-        ):
-            new_stage = RelationshipStage.CLOSE
-        elif (
-            current_stage == RelationshipStage.CLOSE
-            and char_memory.conversation_count >= 100
-            and char_memory.trust_level >= 9
-            and char_memory.affection_level >= 9
-        ):
-            new_stage = RelationshipStage.BEST_FRIEND
-
-        # 降级条件（负面信号累积）
-        if trust_signal == "下降" and affection_signal == "下降":
-            consecutive_negative = sum(
-                1 for e in char_memory.emotional_history[-3:]
-                if e.get("mood") in ("angry", "negative")
-            )
-            if consecutive_negative >= 3 and current_stage != RelationshipStage.STRANGER:
-                new_stage = demote_stage(current_stage)
-
-        char_memory.relationship_stage = new_stage.value
