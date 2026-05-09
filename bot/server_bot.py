@@ -73,6 +73,9 @@ class QQBotServer:
         # 群聊活跃度追踪
         self._group_activity: dict[str, list[dict]] = {}  # group_key -> [messages]
         self._group_last_reply: dict[str, float] = {}  # group_key -> last reply time
+        # 消息防抖（私聊连续消息合并后统一回复）
+        self._debounce_buf: dict[str, list] = {}  # user_id -> [messages]
+        self._debounce_task: dict[str, asyncio.Task] = {}  # user_id -> pending task
         # 群聊风格学习
         self._group_styles: dict[str, dict] = {}  # group_key -> {freq: {}, emoticons: [], endings: []}
         # 个人风格学习（按用户）
@@ -180,6 +183,20 @@ class QQBotServer:
         if not raw_message or not bind_key:
             return
 
+        # ---- 私聊防抖：连续消息收集后统一回复 ----
+        if msg_type == "private" and not raw_message.startswith("/"):
+            if user_id not in self._debounce_buf:
+                self._debounce_buf[user_id] = []
+            self._debounce_buf[user_id].append(raw_message)
+            # 取消旧任务，启动新任务（5秒后统一处理）
+            old = self._debounce_task.get(user_id)
+            if old and not old.done():
+                old.cancel()
+            self._debounce_task[user_id] = asyncio.ensure_future(
+                self._debounce_process(user_id, event, bind_key)
+            )
+            return
+
         # ---- 系统命令（群聊中斜杠命令不需要 @） ----
         if raw_message.startswith("/"):
             if msg_type == "group":
@@ -203,16 +220,20 @@ class QQBotServer:
                 elif not await self._should_chime_in(bind_key, event):
                     return
 
-        # 私聊也做轻量画像采集
-        if msg_type == "private":
-            self._learn_user_style(user_id, raw_message)
-            self._save_user_traits(user_id, raw_message)
-
         # 保存事件用于主动对话
         await self._store_event(bind_key, event)
 
         character_id = self._get_user_character(bind_key)
-        if not character_id:
+
+        # 轻量画像采集（确保在 character_id 解析之后调用）
+        target_cid = character_id
+        if msg_type == "private":
+            self._learn_user_style(user_id, raw_message)
+        if target_cid:
+            self._save_user_traits(user_id, raw_message, target_cid)
+        else:
+            self._save_user_traits(user_id, raw_message)
+        if not target_cid:
             # 默认绑定到露西亚
             chars = self.engine.char_mgr.list_characters()
             default = None
@@ -301,8 +322,6 @@ class QQBotServer:
         # 风格学习（群聊 + 个人）
         self._learn_group_style(bind_key, message)
         self._learn_user_style(user_id, message)
-        # 不回复也轻量保存用户画像
-        self._save_user_traits(user_id, message)
 
     def _learn_group_style(self, bind_key: str, message: str):
         """从消息中学习群聊的说话风格"""
@@ -618,6 +637,112 @@ class QQBotServer:
         # 取最近 3 条消息作为上下文
         context_lines = [m["text"][:60] for m in recent[-3:]]
         return " | ".join(context_lines)
+
+    # ---- 防抖处理 ----
+
+    async def _debounce_process(self, user_id: str, event: dict, bind_key: str):
+        """等待5秒后统一处理收集到的多条消息"""
+        try:
+            await asyncio.sleep(5)
+            msgs = self._debounce_buf.pop(user_id, [])
+            if not msgs or len(msgs) == 0:
+                return
+
+            # 合并消息
+            combined = " ".join(msgs)
+            event["raw_message"] = combined
+            event["message"] = combined
+
+            # 直接调用后续处理（跳过防抖逻辑）
+            await self._process_single_message(event, bind_key, combined)
+        except asyncio.CancelledError:
+            pass  # 有新消息来了，取消旧任务
+        except Exception as e:
+            logger.error("防抖处理异常: %s", e)
+
+    async def _process_single_message(self, event: dict, bind_key: str, raw_message: str):
+        """处理单条消息（防抖合并后调用）"""
+        msg_type = event.get("message_type", "private")
+        user_id = str(event.get("user_id", ""))
+        import time as _t
+
+        if raw_message.startswith("/"):
+            if msg_type == "group":
+                raw_message = self._strip_at(raw_message)
+            await self._handle_command(raw_message, bind_key, event)
+            return
+
+        if msg_type == "group":
+            if not self._is_at_bot(event):
+                return
+            raw_message = self._strip_at(raw_message)
+
+        await self._store_event(bind_key, event)
+
+        character_id = self._get_user_character(bind_key)
+        if not character_id:
+            chars = self.engine.char_mgr.list_characters()
+            for c in chars:
+                if c["name"] == "露西亚":
+                    default = c
+                    break
+            if not default and chars:
+                default = chars[0]
+            if default:
+                character_id = default["id"]
+                self._set_user_character(bind_key, character_id)
+                await self._send_switch_greeting(event, character_id)
+                return
+            await self._reply(event, "暂无可用角色。")
+            return
+
+        target_cid = character_id
+        if target_cid:
+            self._save_user_traits(user_id, raw_message, target_cid)
+        else:
+            self._save_user_traits(user_id, raw_message)
+
+        if msg_type == "group":
+            group_style = self._get_group_style(bind_key)
+            if group_style:
+                raw_message = f"[群聊风格: {group_style}] {raw_message}"
+
+        try:
+            memory_user = bind_key if msg_type == "group" else user_id
+            reply, memory_data = await self.engine.process_message(
+                user_message=raw_message,
+                user_id=memory_user,
+                character_id=character_id,
+                is_group=(msg_type == "group"),
+            )
+            if msg_type == "group" and memory_data:
+                user_profile = self.engine.profile_mgr.get_or_create_profile(f"user_{user_id}")
+                user_cm = user_profile.get_or_create_char_memory(character_id)
+                traits = memory_data.get("observations", {}).get("new_traits", [])
+                for t in traits:
+                    if t and t not in user_cm.observed_traits:
+                        user_cm.observed_traits.append(t)
+                mood = memory_data.get("observations", {}).get("mood", "")
+                if mood and mood != "neutral":
+                    user_cm.emotional_history.append({"mood": mood, "timestamp": datetime.now().isoformat()})
+                user_cm.conversation_count += 1
+                interests = memory_data.get("observations", {}).get("interests_mentioned", [])
+                for i in interests:
+                    if i and i not in user_cm.observed_interests:
+                        user_cm.observed_interests.append(i)
+                self.engine.profile_mgr.save_profile(user_profile)
+
+            if reply:
+                import time as _t2
+                if msg_type == "group":
+                    self._group_engaged[bind_key] = _t2.time()
+                reply = await self._attach_sticker(reply, character_id)
+                reply = await self.plugin_mgr.dispatch_message(event, reply)
+                if reply:
+                    await self._reply(event, reply)
+
+        except Exception as e:
+            logger.error("处理消息异常 user=%s: %s", user_id, e)
 
     # ---- 命令处理 ----
 
