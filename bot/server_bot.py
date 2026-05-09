@@ -343,11 +343,27 @@ class QQBotServer:
                 cm = profile.get_or_create_char_memory(c["id"])
                 cm.conversation_count += 1
 
-                # 记录情绪
-                if mood and mood != "neutral":
+                # 记录情绪（包括 neutral，确保 /状态 能显示）
+                if mood:
                     cm.emotional_history.append({"mood": mood, "timestamp": datetime.now().isoformat()})
-                    if len(cm.emotional_history) > 30:
+                    if len(cm.emotional_history) > 50:
                         cm.emotional_history = cm.emotional_history[-30:]
+
+                # ---- 信任/关系更新（不依赖 AI MEMORY 块）----
+                conv = cm.conversation_count
+                if conv >= 5 and cm.relationship_stage == "陌生人":
+                    cm.relationship_stage = "初识"
+                if conv >= 20 and cm.trust_level >= 2 and cm.relationship_stage == "初识":
+                    cm.relationship_stage = "熟悉"
+                if conv >= 50 and cm.trust_level >= 4 and cm.relationship_stage == "熟悉":
+                    cm.relationship_stage = "亲密"
+                # 信任度按轮数自动增长
+                auto_trust = min(10, 1 + conv // 15)
+                if auto_trust > cm.trust_level:
+                    cm.trust_level = auto_trust
+                auto_affection = min(10, 1 + conv // 12)
+                if auto_affection > cm.affection_level:
+                    cm.affection_level = auto_affection
 
                 # ---- 性格特征检测 ----
                 trait = self._detect_trait(message)
