@@ -367,6 +367,35 @@ class QQBotServer:
                             if not existing:
                                 cm.observed_interests.append(topic)
                                 break
+                # ---- 行为模式分析 ----
+                bp = cm.behavioral_patterns
+                # 平均消息长度
+                msg_len = len(message)
+                prev_count = bp.get("msg_count", 0)
+                prev_avg = bp.get("avg_msg_len", msg_len)
+                bp["avg_msg_len"] = (prev_avg * prev_count + msg_len) / (prev_count + 1)
+                bp["msg_count"] = prev_count + 1
+
+                # 提问倾向
+                if "?" in message or "？" in message:
+                    bp["question_rate"] = (bp.get("question_rate", 0) * prev_count + 1) / (prev_count + 1)
+                else:
+                    bp["question_rate"] = (bp.get("question_rate", 0) * prev_count) / (prev_count + 1)
+
+                # 表情使用率
+                if any(e in message for e in ["😂", "😊", "😭", "😅", "🤣", "❤️", "😢", "😡", "👍", "🙏"]):
+                    bp["emoji_rate"] = (bp.get("emoji_rate", 0) * prev_count + 1) / (prev_count + 1)
+                else:
+                    bp["emoji_rate"] = (bp.get("emoji_rate", 0) * prev_count) / (prev_count + 1)
+
+                # 回复长度偏好
+                if msg_len < 10:
+                    bp["reply_style"] = "简短"
+                elif msg_len < 30:
+                    bp["reply_style"] = "中等"
+                else:
+                    bp["reply_style"] = "详细"
+
                 break  # 只处理第一个角色
             self.engine.profile_mgr.save_profile(profile)
         except Exception:
