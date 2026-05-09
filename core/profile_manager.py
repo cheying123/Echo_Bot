@@ -568,13 +568,24 @@ class ProfileManager:
     # ---- 内部方法 ----
 
     def _update_relationship(self, char_memory: PerCharacterMemory, memory: MemoryBlock):
-        """根据 AI 建议 + 对话轮数更新关系状态"""
+        """根据对话轮数 + 情绪趋势 + 互动深度更新关系"""
         current = char_memory.relationship_stage
-
-        # 信任/好感按对话轮数自动增长（兜底，不依赖 AI 信号）
         conv = char_memory.conversation_count
-        auto_trust = min(10, 1 + conv // 10)
-        auto_affection = min(10, 1 + conv // 8)
+
+        # 情绪趋势分析（最近 10 条情绪中正面比例）
+        positive_ratio = 0.5
+        recent = [e for e in char_memory.emotional_history[-10:] if e.get("mood")]
+        if recent:
+            positive_count = sum(1 for e in recent if e["mood"] in ("positive", "excited"))
+            positive_ratio = positive_count / len(recent)
+
+        # 互动深度（有共同经历/兴趣记录加分）
+        depth_bonus = min(3, len(char_memory.observed_interests) // 3)
+        depth_bonus += min(2, len(char_memory.shared_history))
+
+        # 信任/好感 = 基础轮数 + 情绪加分 + 深度加分
+        auto_trust = min(10, 1 + conv // 12 + depth_bonus)
+        auto_affection = min(10, 1 + conv // 10 + int(positive_ratio * 2))
         if auto_trust > char_memory.trust_level:
             char_memory.trust_level = auto_trust
         if auto_affection > char_memory.affection_level:

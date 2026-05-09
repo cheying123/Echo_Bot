@@ -62,6 +62,7 @@ SYSTEM_PROMPT_TEMPLATE = """# 角色扮演协议 v1.0
 【近期情绪】{user_recent_mood}
 【关系阶段】{relationship_stage}
 【历史共同话题】{shared_topics}
+{user_behavior}
 
 ---
 
@@ -230,6 +231,26 @@ class PromptBuilder:
         # 共同话题
         shared_topics = self._get_shared_topics(char_memory)
 
+        # 行为模式
+        behavior_text = ""
+        if char_memory and char_memory.behavioral_patterns:
+            bp = char_memory.behavioral_patterns
+            parts = []
+            avg_len = bp.get("avg_msg_len", 0)
+            if avg_len:
+                style = "简短" if avg_len < 10 else "中等" if avg_len < 30 else "详细"
+                parts.append(f"偏好{style}回复")
+            q_rate = bp.get("question_rate", 0)
+            if q_rate > 0.4:
+                parts.append("爱提问")
+            elif q_rate < 0.1:
+                parts.append("不爱提问")
+            emoji_rate = bp.get("emoji_rate", 0)
+            if emoji_rate > 0.3:
+                parts.append("爱用表情")
+            if parts:
+                behavior_text = f"\n【用户习惯】{'、'.join(parts)}"
+
         # 关系阶段
         stage = char_memory.relationship_stage if char_memory else "陌生人"
 
@@ -284,6 +305,7 @@ class PromptBuilder:
             user_recent_mood=recent_mood,
             relationship_stage=stage,
             shared_topics=shared_topics,
+            user_behavior=behavior_text,
             dialogue_max_length=f"核心回复控制在{max_len}字以内。遇到开放话题或情绪低落时可以多说几句。",
             dialogue_max_questions="单轮对话自然延续即可，不必刻意限制问句数量。",
             action_description_rule=action_rule,
