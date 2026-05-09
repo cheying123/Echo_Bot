@@ -111,10 +111,22 @@ class DialogueEngine:
         profile = self.profile_mgr.get_or_create_profile(user_id)
         char_memory = profile.get_or_create_char_memory(character_id)
 
+        # 1.1) 计算/更新兼容性评分
+        self._update_compatibility(character, char_memory)
+
+        # 1.2) 行为模式调整：注入说话风格
+        bp = char_memory.behavioral_patterns or {}
+        if bp.get("reply_style") == "简短":
+            max_len = max(30, self.cfg.dialogue.get("max_response_length", 100) // 2)
+        elif bp.get("reply_style") == "详细":
+            max_len = min(200, self.cfg.dialogue.get("max_response_length", 100) + 50)
+        else:
+            max_len = self.cfg.dialogue.get("max_response_length", 100)
+
         # 2) 记录用户消息到短期上下文
         self.context_mgr.add_user_message(user_id, character_id, user_message)
 
-        # 3) 构建系统提示词（含台词检索）
+        # 3) 构建系统提示词（含台词检索 + 行为模式调整）
         system_prompt = self.prompt_builder.build_system_prompt(
             character=character,
             user_id=user_id,
@@ -122,6 +134,7 @@ class DialogueEngine:
             char_memory=char_memory,
             user_message=user_message,
             is_group=is_group,
+            custom_max_length=max_len,
         )
 
         # 4) 获取最近对话历史
@@ -330,6 +343,39 @@ class DialogueEngine:
 
         except Exception as e:
             logger.error("生成摘要失败: %s", e)
+
+    # ---- 兼容性评分 ----
+
+    def _update_compatibility(self, character: CharacterCard, char_memory: PerCharacterMemory):
+        """根据用户特征与角色性格的匹配度更新兼容性评分"""
+        score = self._calculate_compatibility(char_memory, character)
+        char_memory.compatibility_score = round(score, 2)
+
+    @staticmethod
+    def _calculate_compatibility(memory: PerCharacterMemory, character: CharacterCard) -> float:
+        """计算用户与角色的兼容性 0.0~1.0"""
+        if not character.personality.core_traits:
+            return 0.5
+        # 用户特征与角色性格的重合度
+        user_traits = set(memory.observed_traits)
+        char_traits = set(character.personality.core_traits)
+        overlap = user_traits & char_traits
+        if not char_traits:
+            return 0.5
+        trait_match = len(overlap) / len(char_traits)
+
+        # 兴趣多样性加分
+        interest_bonus = min(0.2, len(memory.observed_interests) * 0.03)
+
+        # 情绪积极性加分
+        recent = memory.emotional_history[-10:]
+        if recent:
+            pos = sum(1 for e in recent if e.get("mood") in ("positive", "excited"))
+            mood_score = (pos / len(recent)) * 0.3
+        else:
+            mood_score = 0.15
+
+        return min(1.0, trait_match * 0.5 + mood_score + interest_bonus)
 
     # ---- 异步辅助（不阻塞主回复流程） ----
 

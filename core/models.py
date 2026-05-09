@@ -212,6 +212,8 @@ class PerCharacterMemory(BaseModel):
     trait_last_seen: Dict[str, str] = Field(default_factory=dict)  # trait -> timestamp
     # 行为模式分析
     behavioral_patterns: Dict[str, Any] = Field(default_factory=dict)  # 如 {"likes_questions": 0.7, "avg_msg_len": 12.3}
+    # 兼容性评分（0.0-1.0，基于用户特征与角色性格的匹配度）
+    compatibility_score: float = 0.0
 
     def compress(self, max_age_days: int = 30) -> bool:
         """压缩记忆：移除过时的特征标签，返回 True 表示有改动"""

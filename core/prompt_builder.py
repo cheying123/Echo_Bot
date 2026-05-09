@@ -173,6 +173,7 @@ class PromptBuilder:
         current_time: Optional[str] = None,
         user_message: str = "",  # 当前用户消息
         is_group: bool = False,
+        custom_max_length: Optional[int] = None,
     ) -> str:
         """构建系统提示词"""
         from datetime import datetime
@@ -256,7 +257,7 @@ class PromptBuilder:
 
         # 对话配置
         dia_cfg = character.dialogue_config
-        max_len = dia_cfg.max_length or self.cfg.dialogue.get("max_response_length", 60)
+        max_len = custom_max_length or dia_cfg.max_length or self.cfg.dialogue.get("max_response_length", 60)
         max_q = dia_cfg.max_questions_per_turn or 1
         action_enabled = (
             dia_cfg.allow_action_description
