@@ -183,19 +183,12 @@ class DialogueEngine:
         char_memory.last_message_at = datetime.now().isoformat()
         self.total_time += elapsed
 
-        # 6) 解析 MEMORY 块
-        memory_block, clean_reply = extract_and_parse(raw_response)
-
+        # 6) 第二段调用：提取记忆（异步，不阻塞回复）
         self.total_time += elapsed
-
-        # 7) 记忆提取异步化（不阻塞回复）
-        if memory_block:
-            extraction_interval = self.cfg.memory.get("memory_extraction_interval", 3)
-            should_extract = (char_memory.conversation_count + 1) % extraction_interval == 0
-            if should_extract:
-                asyncio.ensure_future(self._async_merge_memory(
-                    user_id, character_id, memory_block
-                ))
+        if (char_memory.conversation_count + 1) % max(1, self.cfg.memory.get("memory_extraction_interval", 3)) == 0:
+            asyncio.ensure_future(self._async_extract_memory(
+                user_id, character_id, user_message, clean_reply, system_prompt,
+            ))
 
         # 8) 记录 AI 回复到上下文
         self.context_mgr.add_assistant_message(
@@ -406,7 +399,79 @@ class DialogueEngine:
 
         return adj
 
-    # ---- 异步辅助（不阻塞主回复流程） ----
+    # ---- 第二段记忆提取 ----
+
+    async def _async_extract_memory(
+        self, user_id: str, character_id: str,
+        user_msg: str, bot_reply: str, system_prompt: str,
+    ):
+        """异步调用 API 提取记忆（不阻塞主回复流程）"""
+        try:
+            extract_prompt = (
+                "你是一个对话分析器。分析以下对话，提取关键信息，严格按 JSON 格式输出（不要加任何其他文字）：\n"
+                "{\"mood\": \"用户情绪: positive/neutral/negative\", "
+                "\"new_traits\": [\"性格特征数组\"], "
+                "\"interests\": [\"兴趣数组\"], "
+                "\"trust\": \"提升/维持/下降\", "
+                "\"affection\": \"提升/维持/下降\", "
+                "\"tone\": \"下次回复建议语气\"}\n\n"
+                f"用户说: {user_msg[:200]}\n角色回: {bot_reply[:200]}"
+            )
+            result = await self.llm.chat(
+                system_prompt="你是一个JSON输出器，只输出JSON，不要任何其他文字。",
+                messages=[LLMMessage(role="user", content=extract_prompt)],
+                max_tokens=300,
+            )
+            self.total_calls += 1
+
+            # 解析 JSON
+            import json as _json
+            import re as _re
+            json_str = result.strip()
+            # 提取 JSON 块（如果 AI 输出多余文字）
+            m = _re.search(r'\{.*\}', json_str, _re.DOTALL)
+            if m:
+                json_str = m.group()
+            data = _json.loads(json_str)
+
+            # 合并到档案
+            profile = self.profile_mgr.get_or_create_profile(user_id)
+            cm = profile.get_or_create_char_memory(character_id)
+
+            for t in data.get("new_traits", []):
+                if t and len(t) <= 15 and t not in cm.observed_traits:
+                    cm.observed_traits.append(t)
+            mood = data.get("mood", "")
+            if mood and mood != "neutral":
+                cm.emotional_history.append({"mood": mood, "timestamp": datetime.now().isoformat()})
+            for i in data.get("interests", []):
+                if i and i not in cm.observed_interests:
+                    cm.observed_interests.append(i)
+            if data.get("tone"):
+                cm.last_tonal_suggestion = data["tone"]
+
+            # 关系更新
+            from core.profile_manager import ProfileManager
+            # 复用 _update_relationship 逻辑
+            if hasattr(self, 'profile_mgr'):
+                from core.models import MemoryBlock, MemoryObservation, RelationshipState, StrategyAdjustment
+                fake_memory = MemoryBlock(
+                    user_id=user_id,
+                    observations=MemoryObservation(mood=mood),
+                    relationship=RelationshipState(
+                        trust_signal=data.get("trust", "维持"),
+                        affection_signal=data.get("affection", "维持"),
+                    ),
+                    strategy_adjustments=StrategyAdjustment(next_tone=data.get("tone", "")),
+                )
+                self.profile_mgr.merge_memory_block(user_id, character_id, fake_memory)
+
+            logger.info("第二段记忆提取成功 user=%s mood=%s", user_id, mood)
+
+        except Exception as e:
+            logger.debug("第二段记忆提取失败: %s（不影响对话回复）", e)
+
+    # ---- 异步辅助 ----
 
     async def _async_merge_memory(
         self, user_id: str, character_id: str, memory: MemoryBlock
