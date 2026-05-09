@@ -223,7 +223,7 @@ class PromptBuilder:
         forbidden_text = "；".join(character.forbidden) if character.forbidden else "无"
 
         # ---- 用户画像摘要 ----
-        summary = self._build_profile_summary(profile, char_memory)
+        summary = self._build_profile_summary(profile, char_memory, character)
 
         # 近期情绪
         recent_mood = self._get_recent_mood(char_memory)
@@ -342,40 +342,107 @@ class PromptBuilder:
         self,
         profile: UserProfile,
         char_memory: Optional[PerCharacterMemory],
+        character: Optional[CharacterCard] = None,
     ) -> str:
-        """构建用户画像摘要（150-300 tokens）"""
+        """构建用户画像摘要，包含性格匹配和情绪洞察"""
         if not char_memory:
             return "新用户，尚未建立画像。"
 
         parts = []
 
-        # 性格标签（取最新 5 个）
+        # 性格标签
         traits = char_memory.observed_traits
         if traits:
             parts.append(f"性格特征: {'、'.join(traits[:5])}")
 
-        # 兴趣（取最新 5 个）
+        # 性格匹配：用户特征与角色性格的契合点
+        if character and traits:
+            matched = [t for t in traits if t in character.personality.core_traits]
+            if matched:
+                parts.append(f"性格契合: {'、'.join(matched[:3])}")
+
+        # 兴趣
         interests = char_memory.observed_interests
         if interests:
             parts.append(f"兴趣: {'、'.join(interests[:5])}")
 
-        # 反感事物
+        # 反感
         dislikes = char_memory.observed_dislikes
         if dislikes:
             parts.append(f"反感: {'、'.join(dislikes[:3])}")
+
+        # 情绪洞察（分析最近情绪趋势）
+        mood_insight = self._analyze_mood_patterns(char_memory)
+        if mood_insight:
+            parts.append(f"情绪洞察: {mood_insight}")
 
         # 说话习惯
         last_tone = char_memory.last_tonal_suggestion
         if last_tone:
             parts.append(f"建议语气: {last_tone}")
 
+        # 行为模式（从 behavioral_patterns 提取）
+        bp = char_memory.behavioral_patterns
+        if bp:
+            style = bp.get("reply_style", "")
+            q_rate = bp.get("question_rate", 0)
+            if style:
+                parts.append(f"偏好: {style}回复" + ("、爱提问" if q_rate > 0.4 else "" if q_rate < 0.1 else ""))
+
+        # 互动建议（根据关系阶段 + 情绪 + 行为综合）
+        advice = self._generate_interaction_advice(char_memory)
+        if advice:
+            parts.append(f"互动建议: {advice}")
+
         # 最近摘要
         if char_memory.last_summary:
-            # 摘要可能很长，截取前 100 字
-            summary_trunc = char_memory.last_summary[:100]
-            parts.append(f"对话摘要: {summary_trunc}")
+            parts.append(f"对话摘要: {char_memory.last_summary[:100]}")
 
         return "；".join(parts) if parts else "新用户，尚未建立画像。"
+
+    @staticmethod
+    def _generate_interaction_advice(char_memory: PerCharacterMemory) -> str:
+        """根据画像数据生成互动建议"""
+        stage = char_memory.relationship_stage
+        bp = char_memory.behavioral_patterns or {}
+
+        if stage == "陌生人":
+            return "保持礼貌距离，以开放性问题引导对话"
+        if stage in ("初识",):
+            return "可以聊日常话题，逐渐了解对方兴趣"
+        if stage == "熟悉":
+            return "可以更随意，适当分享个人感受"
+        if stage in ("亲密", "挚友"):
+            return "可以深度交流情感话题"
+
+        return ""
+
+    @staticmethod
+    def _analyze_mood_patterns(char_memory: PerCharacterMemory) -> str:
+        """分析情绪趋势和波动"""
+        history = char_memory.emotional_history
+        if len(history) < 3:
+            return ""
+
+        recent = [e.get("mood", "") for e in history[-8:]]
+
+        # 情绪趋势：最近是否越来越积极
+        positive_count = sum(1 for m in recent if m in ("positive", "excited"))
+        negative_count = sum(1 for m in recent if m in ("negative", "angry", "sad"))
+
+        if positive_count >= len(recent) * 0.6:
+            return "近期整体积极"
+        if negative_count >= len(recent) * 0.5:
+            return "近期偏负面，需要多关照情绪"
+        if negative_count >= len(recent) * 0.3:
+            return "偶尔有负面情绪"
+
+        # 情绪波动检测
+        unique_moods = set(recent)
+        if len(unique_moods) >= 3:
+            return "情绪波动较大"
+
+        return ""
 
     def _get_recent_mood(self, char_memory: Optional[PerCharacterMemory]) -> str:
         if not char_memory or not char_memory.emotional_history:

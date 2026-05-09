@@ -148,16 +148,20 @@ class DialogueEngine:
             user_id, character_id, len(raw_response), elapsed,
         )
 
-        # 5.1) 自审与重写（最多改 1 次，可开关）
+        # 5.1) 规则检查：替换昂贵的 LLM 自审，用轻量规则过滤
         if self.cfg.get("dialogue", "self_review", default=True):
-            review = await self._self_review(
-                character, user_message, raw_response, system_prompt,
-            )
-            if not review.get("pass", True):
-                feedback = review.get("feedback", "")
-                logger.info("自审未通过，重写中... feedback=%s", feedback[:50])
+            # 规则 1：回复太短（<5字）可能有问题
+            if len(raw_response.strip()) < 5:
                 raw_response = await self._rewrite_response(
-                    character, user_message, raw_response, feedback, system_prompt,
+                    character, user_message, raw_response,
+                    "回复太短，请展开说一下。", system_prompt,
+                )
+                self.total_calls += 1
+            # 规则 2：回复长度远长于用户消息（>4倍），可能啰嗦
+            elif len(raw_response) > len(user_message) * 4 and len(raw_response) > 150:
+                raw_response = await self._rewrite_response(
+                    character, user_message, raw_response,
+                    "回复太长，请精简。", system_prompt,
                 )
                 self.total_calls += 1
 
