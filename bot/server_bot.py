@@ -127,15 +127,16 @@ class QQBotServer:
         logger.info("go-cqhttp 已连接: %s", peer)
         self._ws = ws
 
-        # 上线通知：给所有管理员发消息
+        # 上线通知：只给开启了通知的管理员发
         try:
             admins = self.engine.profile_mgr.list_admins()
             for admin_id in admins[:3]:
-                action = {
-                    "action": "send_msg",
-                    "params": {"message_type": "private", "user_id": int(admin_id), "message": "Echo_Bot 已重新上线。"},
-                }
-                await ws.send(json.dumps(action))
+                if self.engine.profile_mgr.get_admin_notify(admin_id):
+                    action = {
+                        "action": "send_msg",
+                        "params": {"message_type": "private", "user_id": int(admin_id), "message": "Echo_Bot 已重新上线。"},
+                    }
+                    await ws.send(json.dumps(action))
         except Exception:
             pass
 
@@ -668,6 +669,8 @@ class QQBotServer:
             await self._cmd_list_remind(bind_key, event)
         elif action in ("统计", "stats"):
             await self._cmd_stats(bind_key, event)
+        elif action in ("上线通知", "notify"):
+            await self._cmd_notify(bind_key, arg, event)
         elif action in ("添加角色", "addchar"):
             await self._cmd_addchar(bind_key, event)
         elif action in ("删除角色", "removechar", "del角色"):
@@ -968,6 +971,20 @@ class QQBotServer:
             f"速率: {st['calls_last_min']}/分钟",
         ]
         await self._reply(event, "\n".join(lines))
+
+    async def _cmd_notify(self, bind_key: str, arg: str, event: dict):
+        """控制上线通知开关"""
+        user_id = bind_key.replace("private_", "").replace("group_", "")
+        cmd = arg.strip().lower()
+        if cmd in ("off", "关", "关闭"):
+            self.engine.profile_mgr.set_admin_notify(user_id, False)
+            await self._reply(event, "上线通知已关闭。")
+        elif cmd in ("on", "开", "开启"):
+            self.engine.profile_mgr.set_admin_notify(user_id, True)
+            await self._reply(event, "上线通知已开启。")
+        else:
+            status = "开启" if self.engine.profile_mgr.get_admin_notify(user_id) else "关闭"
+            await self._reply(event, f"上线通知当前: {status}\n/上线通知 on 开启\n/上线通知 off 关闭")
 
     async def _cmd_reload(self, bind_key: str, event: dict):
         """重新加载角色卡（管理员）"""

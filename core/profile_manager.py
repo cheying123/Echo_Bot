@@ -269,6 +269,10 @@ class ProfileManager:
                 conn.execute("ALTER TABLE user_settings ADD COLUMN weather_time INTEGER DEFAULT 8")
             except Exception:
                 pass
+            try:
+                conn.execute("ALTER TABLE admins ADD COLUMN notify_on_reconnect INTEGER DEFAULT 1")
+            except Exception:
+                pass
             conn.commit()
             conn.close()
 
@@ -345,6 +349,24 @@ class ProfileManager:
                     conn.close()
         except Exception:
             return False
+
+    def get_admin_notify(self, user_id: str) -> bool:
+        row = self._fetch_one(
+            "SELECT notify_on_reconnect FROM admins WHERE user_id = ?", (user_id,)
+        )
+        return bool(row[0]) if row else True
+
+    def set_admin_notify(self, user_id: str, on: bool):
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "UPDATE admins SET notify_on_reconnect = ? WHERE user_id = ?",
+                    (int(on), user_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
     def remove_admin(self, user_id: str) -> bool:
         """移除管理员"""
