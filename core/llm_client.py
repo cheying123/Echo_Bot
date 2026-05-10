@@ -111,6 +111,13 @@ class OpenAIClient(LLMClient):
         self.base_delay = retry_cfg.get("base_delay", 1.0)
         self.max_delay = retry_cfg.get("max_delay", 30.0)
 
+        # 熔断器
+        self._circuit_open = False
+        self._circuit_fails = 0
+        self._circuit_threshold = 3  # 连续 3 次失败后熔断
+        self._circuit_open_time = 0.0  # 熔断开启时间
+        self._circuit_cooldown = 60  # 熔断持续 60 秒
+
         # 代理（httpx >= 0.28 使用 proxy 参数）
         proxy_url = self._resolve_proxy(config) or None
 
@@ -133,6 +140,15 @@ class OpenAIClient(LLMClient):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> str:
+        import time as _t
+
+        # 熔断检查
+        if self._circuit_open:
+            if _t.time() - self._circuit_open_time < self._circuit_cooldown:
+                raise RuntimeError(f"熔断器开启中（连续{self._circuit_threshold}次失败），请{int(self._circuit_cooldown - (_t.time() - self._circuit_open_time))}秒后重试")
+            self._circuit_open = False
+            self._circuit_fails = 0
+
         payload = self._build_payload(system_prompt, messages, temperature, max_tokens)
         last_error = None
 
@@ -142,6 +158,8 @@ class OpenAIClient(LLMClient):
                 resp.raise_for_status()
                 data = resp.json()
                 content = data["choices"][0]["message"].get("content", "")
+                # 成功 → 重置熔断
+                self._circuit_fails = 0
                 return content.strip() if content else ""
 
             except Exception as e:
@@ -156,6 +174,13 @@ class OpenAIClient(LLMClient):
                 else:
                     break
 
+        # 熔断：连续失败后开启
+        import time as _t3
+        self._circuit_fails += 1
+        if self._circuit_fails >= self._circuit_threshold:
+            self._circuit_open = True
+            self._circuit_open_time = _t3.time()
+            logger.warning("熔断器已开启（连续%d次失败），冷却%d秒", self._circuit_threshold, self._circuit_cooldown)
         logger.error("API 调用最终失败: %s", last_error)
         raise last_error  # type: ignore[misc]
 

@@ -90,6 +90,8 @@ class DialogueEngine:
         self.total_errors = 0
         self.total_time = 0.0
         self.total_tokens = 0
+        # 滑动窗口（最近 N 次请求时间戳，用于计算速率）
+        self._sliding_window: list[float] = []
 
     # ---- 核心接口 ----
 
@@ -145,6 +147,7 @@ class DialogueEngine:
         # 5) 调用 LLM
         self.total_calls += 1
         start_time = time.time()
+        self._sliding_window.append(start_time)
 
         try:
             raw_response = await self.llm.chat(
@@ -398,6 +401,23 @@ class DialogueEngine:
             adj.personality.speaking_style += "，可以适当使用表情语气"
 
         return adj
+
+    # ---- 运行统计 ----
+
+    def get_stats(self) -> dict:
+        """获取运行统计（含滑动窗口速率）"""
+        now = time.time()
+        # 清理超过 10 分钟的记录
+        self._sliding_window = [t for t in self._sliding_window if now - t < 600]
+        rate_per_min = len([t for t in self._sliding_window if now - t < 60])
+
+        return {
+            "total_calls": self.total_calls,
+            "total_errors": self.total_errors,
+            "avg_time": f"{self.total_time / max(self.total_calls, 1):.1f}s",
+            "qps": f"{rate_per_min / 60:.2f}",
+            "calls_last_min": rate_per_min,
+        }
 
     # ---- 第二段记忆提取 ----
 

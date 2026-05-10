@@ -73,9 +73,8 @@ class QQBotServer:
         # 群聊活跃度追踪
         self._group_activity: dict[str, list[dict]] = {}  # group_key -> [messages]
         self._group_last_reply: dict[str, float] = {}  # group_key -> last reply time
-        # 消息防抖（私聊连续消息合并后统一回复）
-        self._debounce_buf: dict[str, list] = {}  # user_id -> [messages]
-        self._debounce_task: dict[str, asyncio.Task] = {}  # user_id -> pending task
+        # 消息防抖（私聊连续消息合并）
+        self._debounce_time: dict[str, float] = {}  # user_id -> last msg time
         # 群聊风格学习
         self._group_styles: dict[str, dict] = {}  # group_key -> {freq: {}, emoticons: [], endings: []}
         # 个人风格学习（按用户）
@@ -105,6 +104,8 @@ class QQBotServer:
             asyncio.ensure_future(self.plugin_mgr.dispatch_startup())
             # 启动后台任务
             asyncio.ensure_future(self._proactive_loop())
+            # 内存清理
+            asyncio.ensure_future(self._cleanup_loop())
             # 启动定时任务（天气预报 + 日程提醒）
             self._scheduler = Scheduler(
                 self.engine.profile_mgr,
@@ -183,19 +184,15 @@ class QQBotServer:
         if not raw_message or not bind_key:
             return
 
-        # ---- 私聊防抖：连续消息收集后统一回复 ----
-        if msg_type == "private" and not raw_message.startswith("/"):
-            if user_id not in self._debounce_buf:
-                self._debounce_buf[user_id] = []
-            self._debounce_buf[user_id].append(raw_message)
-            # 取消旧任务，启动新任务（5秒后统一处理）
-            old = self._debounce_task.get(user_id)
-            if old and not old.done():
-                old.cancel()
-            self._debounce_task[user_id] = asyncio.ensure_future(
-                self._debounce_process(user_id, event, bind_key)
-            )
-            return
+        # ---- 私聊防抖：连续发消息时只回最后一条 ----
+        import time as _debounce_time
+        if msg_type == "private":
+            now = _debounce_time.time()
+            last = self._debounce_time.get(user_id, 0)
+            if now - last < 1.5:
+                self._debounce_time[user_id] = now
+                return  # 用户还在连续说话，跳过本轮，下条消息会处理
+            self._debounce_time[user_id] = now
 
         # ---- 系统命令（群聊中斜杠命令不需要 @） ----
         if raw_message.startswith("/"):
@@ -638,112 +635,6 @@ class QQBotServer:
         context_lines = [m["text"][:60] for m in recent[-3:]]
         return " | ".join(context_lines)
 
-    # ---- 防抖处理 ----
-
-    async def _debounce_process(self, user_id: str, event: dict, bind_key: str):
-        """等待5秒后统一处理收集到的多条消息"""
-        try:
-            await asyncio.sleep(5)
-            msgs = self._debounce_buf.pop(user_id, [])
-            if not msgs or len(msgs) == 0:
-                return
-
-            # 合并消息
-            combined = " ".join(msgs)
-            event["raw_message"] = combined
-            event["message"] = combined
-
-            # 直接调用后续处理（跳过防抖逻辑）
-            await self._process_single_message(event, bind_key, combined)
-        except asyncio.CancelledError:
-            pass  # 有新消息来了，取消旧任务
-        except Exception as e:
-            logger.error("防抖处理异常: %s", e)
-
-    async def _process_single_message(self, event: dict, bind_key: str, raw_message: str):
-        """处理单条消息（防抖合并后调用）"""
-        msg_type = event.get("message_type", "private")
-        user_id = str(event.get("user_id", ""))
-        import time as _t
-
-        if raw_message.startswith("/"):
-            if msg_type == "group":
-                raw_message = self._strip_at(raw_message)
-            await self._handle_command(raw_message, bind_key, event)
-            return
-
-        if msg_type == "group":
-            if not self._is_at_bot(event):
-                return
-            raw_message = self._strip_at(raw_message)
-
-        await self._store_event(bind_key, event)
-
-        character_id = self._get_user_character(bind_key)
-        if not character_id:
-            chars = self.engine.char_mgr.list_characters()
-            for c in chars:
-                if c["name"] == "露西亚":
-                    default = c
-                    break
-            if not default and chars:
-                default = chars[0]
-            if default:
-                character_id = default["id"]
-                self._set_user_character(bind_key, character_id)
-                await self._send_switch_greeting(event, character_id)
-                return
-            await self._reply(event, "暂无可用角色。")
-            return
-
-        target_cid = character_id
-        if target_cid:
-            self._save_user_traits(user_id, raw_message, target_cid)
-        else:
-            self._save_user_traits(user_id, raw_message)
-
-        if msg_type == "group":
-            group_style = self._get_group_style(bind_key)
-            if group_style:
-                raw_message = f"[群聊风格: {group_style}] {raw_message}"
-
-        try:
-            memory_user = bind_key if msg_type == "group" else user_id
-            reply, memory_data = await self.engine.process_message(
-                user_message=raw_message,
-                user_id=memory_user,
-                character_id=character_id,
-                is_group=(msg_type == "group"),
-            )
-            if msg_type == "group" and memory_data:
-                user_profile = self.engine.profile_mgr.get_or_create_profile(f"user_{user_id}")
-                user_cm = user_profile.get_or_create_char_memory(character_id)
-                traits = memory_data.get("observations", {}).get("new_traits", [])
-                for t in traits:
-                    if t and t not in user_cm.observed_traits:
-                        user_cm.observed_traits.append(t)
-                mood = memory_data.get("observations", {}).get("mood", "")
-                if mood and mood != "neutral":
-                    user_cm.emotional_history.append({"mood": mood, "timestamp": datetime.now().isoformat()})
-                user_cm.conversation_count += 1
-                interests = memory_data.get("observations", {}).get("interests_mentioned", [])
-                for i in interests:
-                    if i and i not in user_cm.observed_interests:
-                        user_cm.observed_interests.append(i)
-                self.engine.profile_mgr.save_profile(user_profile)
-
-            if reply:
-                import time as _t2
-                if msg_type == "group":
-                    self._group_engaged[bind_key] = _t2.time()
-                reply = await self._attach_sticker(reply, character_id)
-                reply = await self.plugin_mgr.dispatch_message(event, reply)
-                if reply:
-                    await self._reply(event, reply)
-
-        except Exception as e:
-            logger.error("处理消息异常 user=%s: %s", user_id, e)
-
     # ---- 命令处理 ----
 
     async def _handle_command(self, cmd: str, bind_key: str, event: dict):
@@ -1055,16 +946,16 @@ class QQBotServer:
 
     async def _cmd_stats(self, bind_key: str, event: dict):
         """显示运行统计"""
-        user_id_num = bind_key.replace("private_", "").replace("group_", "")
-        eng = self.engine
+        st = self.engine.get_stats()
         char_id = self._get_user_character(bind_key)
-        char_name = "未绑定"
         conv_count = 0
+        char_name = "未绑定"
         if char_id:
-            card = eng.char_mgr.get_character(char_id)
+            card = self.engine.char_mgr.get_character(char_id)
             char_name = card.name if card else char_id
-            profile = eng.profile_mgr.get_or_create_profile(
-                bind_key if event.get("message_type") == "group" else user_id_num
+            user_id = bind_key.replace("private_", "").replace("group_", "")
+            profile = self.engine.profile_mgr.get_or_create_profile(
+                bind_key if event.get("message_type") == "group" else user_id
             )
             cm = profile.get_or_create_char_memory(char_id)
             conv_count = cm.conversation_count
@@ -1072,11 +963,10 @@ class QQBotServer:
         lines = [
             f"角色: {char_name}",
             f"对话: {conv_count} 轮",
-            f"API: {eng.total_calls} 次 (失败 {eng.total_errors})",
+            f"API: {st['total_calls']} 次 (失败 {st['total_errors']})",
+            f"均耗时: {st['avg_time']}",
+            f"速率: {st['calls_last_min']}/分钟",
         ]
-        if eng.total_time > 0:
-            avg = eng.total_time / max(eng.total_calls, 1)
-            lines.append(f"平均响应: {avg:.1f}s")
         await self._reply(event, "\n".join(lines))
 
     async def _cmd_reload(self, bind_key: str, event: dict):
@@ -1284,6 +1174,27 @@ class QQBotServer:
         # 在 [CQ:...] 内部不拆分
         parts = re.split(r'(?<=[。？！……!?])(?![^\[]*\])', text)
         return [p.strip() for p in parts if p.strip()]
+
+    # ---- 内存清理 ----
+
+    async def _cleanup_loop(self):
+        """定期清理过期缓存，防止内存泄漏"""
+        import time as _t
+        while True:
+            await asyncio.sleep(300)  # 每 5 分钟
+            now = _t.time()
+            # 清理防抖缓存（超过 30 秒的 stale 数据）
+            stale_debounce = [k for k, v in self._debounce_buf.items() if not self._debounce_task.get(k) or self._debounce_task[k].done()]
+            for k in stale_debounce:
+                self._debounce_buf.pop(k, None)
+                self._debounce_task.pop(k, None)
+            # 清理群聊活跃度（超过 30 分钟不活跃的群）
+            stale_groups = [k for k in self._group_activity if self._group_last_reply.get(k, 0) < now - 1800]
+            for k in stale_groups:
+                self._group_activity.pop(k, None)
+                self._group_last_reply.pop(k, None)
+                self._group_styles.pop(k, None)
+                self._group_engaged.pop(k, None)
 
     # ---- 主动对话 ----
 
