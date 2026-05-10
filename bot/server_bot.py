@@ -75,6 +75,8 @@ class QQBotServer:
         self._group_last_reply: dict[str, float] = {}  # group_key -> last reply time
         # 消息防抖（私聊连续消息合并）
         self._debounce_time: dict[str, float] = {}  # user_id -> last msg time
+        # 消息时间追踪（用于时间间隔提示）
+        self._last_msg_time: dict[str, float] = {}  # user_id -> 上条消息时间
         # 群聊风格学习
         self._group_styles: dict[str, dict] = {}  # group_key -> {freq: {}, emoticons: [], endings: []}
         # 个人风格学习（按用户）
@@ -249,6 +251,19 @@ class QQBotServer:
             # 没有角色时提示
             await self._reply(event, "暂无可用角色。")
             return
+
+        # 时间间隔上下文注入
+        import time as _time3
+        now = _time3.time()
+        last_time = self._last_msg_time.get(user_id, now)
+        gap = now - last_time
+        self._last_msg_time[user_id] = now
+        if gap > 60 and character_id:  # 超过 1 分钟才提示
+            if gap > 3600:
+                hint = f"（距离上条消息已过去 {int(gap//3600)} 小时 {int(gap%3600//60)} 分钟）"
+            elif gap > 60:
+                hint = f"（距离上条消息已过去 {int(gap//60)} 分钟）"
+            raw_message = f"{hint} {raw_message}"
 
         # 群聊时注入风格上下文
         if msg_type == "group":

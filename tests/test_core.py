@@ -261,9 +261,9 @@ class TestRetriever(unittest.TestCase):
         self.assertEqual(results, [])
 
     def test_chinese_tokenize(self):
-        tokens = self.r._extract_ngrams("指挥官你好")
+        from core.retriever import TwoStageRetriever
+        tokens = TwoStageRetriever()._extract_ngrams("指挥官你好")
         self.assertGreater(len(tokens), 0)
-        # 应该包含 1-gram 和 2-gram
         self.assertIn("指挥", tokens)
         self.assertIn("官你", tokens)
 

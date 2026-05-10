@@ -289,15 +289,21 @@ class PromptBuilder:
     # ---- 内部辅助 ----
 
     def _retrieve_relevant_lines(self, user_message: str, dialogues: List[str]) -> List[str]:
-        """从台词库检索与当前消息最相关的台词"""
+        """从台词库检索（TF-IDF，同步）"""
         if not dialogues or not user_message:
             return []
         try:
-            from core.retriever import DialogueRetriever as Tfidf
-            results = Tfidf().retrieve(user_message, dialogues, top_k=5)
-            return [line for line, _ in results]
+            from core.retriever import TwoStageRetriever
+            retriever = TwoStageRetriever()
+            # 同步调用 TF-IDF 段（向量段需异步，这里不用）
+            candidates = retriever._rough_filter(user_message, dialogues, top_k=10)
+            return [line for line, _ in candidates[:5]]
         except Exception:
-            return []
+            try:
+                from core.retriever import DialogueRetriever as Tfidf
+                return [l for l, _ in Tfidf().retrieve(user_message, dialogues, top_k=5)]
+            except Exception:
+                return []
 
     def _format_examples(self, examples: List[SpeechExample]) -> str:
         if not examples:
