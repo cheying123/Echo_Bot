@@ -56,6 +56,11 @@ class ContextManager:
         ctx = self.get_or_create(user_id, character_id)
         ctx.add_turn("assistant", content, memory_block)
 
+    def add_turn(self, user_id: str, character_id: str, role: str, content: str):
+        """直接添加一条对话轮次（用于重启恢复）"""
+        ctx = self.get_or_create(user_id, character_id)
+        ctx.add_turn(role, content)
+
     def get_clean_history(
         self,
         user_id: str,

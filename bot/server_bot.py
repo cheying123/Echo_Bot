@@ -1201,10 +1201,9 @@ class QQBotServer:
             await asyncio.sleep(300)  # 每 5 分钟
             now = _t.time()
             # 清理防抖缓存（超过 30 秒的 stale 数据）
-            stale_debounce = [k for k, v in self._debounce_buf.items() if not self._debounce_task.get(k) or self._debounce_task[k].done()]
+            stale_debounce = [k for k, v in self._debounce_time.items() if v < now - 60]
             for k in stale_debounce:
-                self._debounce_buf.pop(k, None)
-                self._debounce_task.pop(k, None)
+                self._debounce_time.pop(k, None)
             # 清理群聊活跃度（超过 30 分钟不活跃的群）
             stale_groups = [k for k in self._group_activity if self._group_last_reply.get(k, 0) < now - 1800]
             for k in stale_groups:

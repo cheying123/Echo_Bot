@@ -125,6 +125,11 @@ class DialogueEngine:
         else:
             max_len = self.cfg.dialogue.get("max_response_length", 100)
 
+        # 2) 恢复上次的对话上下文（重启后）
+        if not self.context_mgr.get_context_size(user_id, character_id) and char_memory.recent_context:
+            for turn in char_memory.recent_context[-6:]:
+                self.context_mgr.add_turn(user_id, character_id, turn.get("role", "user"), turn.get("content", ""))
+
         # 2) 记录用户消息到短期上下文
         self.context_mgr.add_user_message(user_id, character_id, user_message)
 
@@ -197,6 +202,10 @@ class DialogueEngine:
         self.context_mgr.add_assistant_message(
             user_id, character_id, raw_response, None,
         )
+
+        # 8.1) 持久化最近上下文到 SQLite（重启恢复用）
+        history = self.context_mgr.get_clean_history(user_id, character_id, 6)
+        char_memory.recent_context = history
 
         # 9) 增加对话计数 + 日志（异步，不阻塞）
         asyncio.ensure_future(self._async_log_conversation(
