@@ -23,7 +23,8 @@ class ConsoleBot:
 
     支持：
     - 选择角色
-    - 多轮对话
+    - 多轮对话（私聊模式）
+    - 群聊模拟（多用户、@提及、风格学习）
     - 查看用户画像
     - 切换角色
     """
@@ -34,6 +35,14 @@ class ConsoleBot:
         self.current_char_id: Optional[str] = None
         self.current_char: Optional[CharacterCard] = None
         self.running = True
+        # ---- 群聊模拟 ----
+        self.group_mode = False
+        self.simulated_users = {
+            "user_a": "小明",
+            "user_b": "小红",
+            "user_c": "老张",
+        }
+        self.sim_group_id = "test_group_001"
 
     # ---- 主循环 ----
 
@@ -71,13 +80,32 @@ class ConsoleBot:
     async def _send_message(self, text: str):
         """发送消息并显示回复"""
         try:
+            raw_text = text
+            at_bot = False
+            if self.group_mode:
+                # 以 @bot 开头 => @了机器人
+                if raw_text.startswith("@bot"):
+                    at_bot = True
+                    raw_text = raw_text[len("@bot"):].strip()
+                elif raw_text.startswith("@"):
+                    # @其他用户 => 不是 @机器人
+                    raw_text = raw_text[1:].strip()
+
             reply, memory = await self.engine.process_message(
-                user_message=text,
+                user_message=raw_text,
                 user_id=self.current_user_id,
                 character_id=self.current_char_id,
+                is_group=self.group_mode,
             )
 
-            print(f"\n{self.current_char.name}: {reply}\n")
+            if self.group_mode:
+                user_name = self.simulated_users.get(self.current_user_id, self.current_user_id)
+                at_tag = " @bot" if at_bot else ""
+                print(f"\n[{user_name}{at_tag}] -> {self.current_char.name}:")
+                print(f"  {reply}\n")
+                print(f"  [群聊] is_group=True | 用户={self.current_user_id} | 群={self.sim_group_id}")
+            else:
+                print(f"\n{self.current_char.name}: {reply}\n")
 
             # 调试模式：显示 MEMORY 摘要
             if memory:
@@ -123,8 +151,52 @@ class ConsoleBot:
         elif cmd == "/history":
             self._show_history()
 
+        elif cmd == "/mode":
+            self._toggle_mode()
+
+        elif cmd.startswith("/user "):
+            self._switch_user(cmd[6:].strip())
+
+        elif cmd == "/users":
+            self._list_users()
+
         else:
             print(f"未知命令: {cmd}，输入 /help 查看帮助\n")
+
+    # ---- 群聊模拟 ----
+
+    def _toggle_mode(self):
+        """切换私聊/群聊模式"""
+        self.group_mode = not self.group_mode
+        mode_name = "群聊模拟" if self.group_mode else "私聊"
+        print(f"\n切换到 {mode_name} 模式\n")
+        if self.group_mode:
+            print("群聊模拟说明：")
+            print("  @bot + 消息  = @机器人说话")
+            print("  直接发消息    = 普通群聊消息（机器人不回应）")
+            print("  /user xxx    = 切换身份")
+            print("  /users       = 查看可用用户列表")
+            print()
+
+    def _switch_user(self, user_key: str):
+        """切换当前模拟的用户身份"""
+        if user_key in self.simulated_users:
+            self.current_user_id = user_key
+            user_name = self.simulated_users[user_key]
+            print(f"\n切换到用户: {user_name} ({user_key})\n")
+        else:
+            # 允许使用自定义用户 ID
+            self.current_user_id = user_key
+            print(f"\n切换到自定义用户: {user_key}\n")
+
+    def _list_users(self):
+        """列出当前群聊模拟中的用户"""
+        print("\n=== 可用用户 ===")
+        for uid, name in self.simulated_users.items():
+            marker = " <当前" if uid == self.current_user_id else ""
+            print(f"  /user {uid} = {name}{marker}")
+        print(f"  /user 自定义ID (使用任意字符串)")
+        print()
 
     # ---- 角色选择 ----
 
@@ -140,7 +212,7 @@ class ConsoleBot:
         for i, c in enumerate(chars, 1):
             traits = "、".join(c["traits"]) if c["traits"] else "无标签"
             source = f" [{c['source']}]" if c["source"] else ""
-            print(f"  {i}. {c['name']}{source} — {traits}")
+            print(f"  {i}. {c['name']}{source} -- {traits}")
 
         choice = (await asyncio.to_thread(input, "\n输入角色编号或名称（或 q 取消）: ")).strip()
 
@@ -245,7 +317,7 @@ class ConsoleBot:
 
     def _print_banner(self):
         print("=" * 50)
-        print("    QQ AI Bot — 终端测试模式")
+        print("    QQ AI Bot -- 终端测试模式")
         print("    输入 /help 查看命令")
         print("=" * 50)
         print()
@@ -259,13 +331,22 @@ class ConsoleBot:
   /stats           运行统计
   /history         最近对话历史
   /clear           清空对话上下文
+  /mode            切换 私聊/群聊模拟 模式
+  /user <id>       （群聊模式）切换模拟的用户身份
+  /users           （群聊模式）查看可用用户列表
   /quit, /exit     退出
   /help            显示帮助
+
+群聊模式说明：
+  @bot + 消息  = @机器人，触发回复
+  直接发消息    = 普通群聊消息（机器人不回应）
+  用 /user 切换不同身份，模拟多人聊天
 
 直接输入文本开始对话。
 """)
 
     async def _get_input(self) -> str:
         """获取用户输入"""
-        prefix = f"{self.current_char.name if self.current_char else '?'}> "
+        mode_tag = " [群聊]" if self.group_mode else ""
+        prefix = f"{self.current_char.name if self.current_char else '?'}{mode_tag}> "
         return (await asyncio.to_thread(input, prefix)).strip()
